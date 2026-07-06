@@ -37,6 +37,27 @@ body,
   overflow-x: scroll;
 }
 
+body.ss-chat-page-scroll-lock,
+body.ss-chat-page-scroll-lock #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body.ss-chat-page-scroll-lock .ant-design-pro,
+body.ss-chat-page-scroll-lock .ant-pro-layout-container,
+body.ss-chat-page-scroll-lock .ant-layout {
+  height: 100%;
+  max-height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.ss-chat-page-scroll-lock .ant-pro-layout-content {
+  height: calc(100vh - 56px);
+  min-height: 0;
+  overflow: hidden;
+}
+
 .colorWeak {
   filter: invert(80%);
 }

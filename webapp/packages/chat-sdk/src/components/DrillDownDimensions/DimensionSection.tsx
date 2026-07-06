@@ -1,7 +1,15 @@
+/**
+ * 下钻维度选择模块。
+ *
+ * 职责：
+ * - 展示推荐下钻维度；
+ * - 当推荐维度过多时通过下拉菜单展示额外维度；
+ * - 为动态列表提供稳定 key，并使用 antd v5 的 Dropdown menu API。
+ */
 import classNames from 'classnames';
 import { CLS_PREFIX } from '../../common/constants';
 import { DrillDownDimensionType } from '../../common/type';
-import { Dropdown, Menu } from 'antd';
+import { Dropdown } from 'antd';
 import { DownOutlined } from '@ant-design/icons';
 
 type Props = {
@@ -24,6 +32,7 @@ const DimensionSection: React.FC<Props> = ({
   const prefixCls = `${CLS_PREFIX}-drill-down-dimensions`;
 
   const defaultDimensions = dimensions.slice(0, DEFAULT_DIMENSION_COUNT);
+  const extraDimensions = dimensions.slice(DEFAULT_DIMENSION_COUNT);
 
   if (defaultDimensions.length === 0) {
     return null;
@@ -38,7 +47,7 @@ const DimensionSection: React.FC<Props> = ({
             [`${prefixCls}-content-item-active`]: drillDownDimension?.id === dimension.id,
           });
           return (
-            <div>
+            <div key={dimension.id}>
               <span
                 className={itemNameClass}
                 onClick={() => {
@@ -57,27 +66,23 @@ const DimensionSection: React.FC<Props> = ({
           <div>
             <span>、</span>
             <Dropdown
-              overlay={
-                <Menu>
-                  {dimensions.slice(DEFAULT_DIMENSION_COUNT).map(dimension => {
+              menu={{
+                items: extraDimensions.map(dimension => {
                     const itemNameClass = classNames({
                       [`${prefixCls}-menu-item-active`]: drillDownDimension?.id === dimension.id,
                     });
-                    return (
-                      <Menu.Item key={dimension.id}>
-                        <span
-                          className={itemNameClass}
-                          onClick={() => {
-                            onSelectDimension(dimension);
-                          }}
-                        >
-                          {dimension.name}
-                        </span>
-                      </Menu.Item>
-                    );
-                  })}
-                </Menu>
-              }
+                    return {
+                      key: String(dimension.id),
+                      label: <span className={itemNameClass}>{dimension.name}</span>,
+                    };
+                  }),
+                onClick: ({ key }) => {
+                  const selectedDimension = extraDimensions.find(dimension => String(dimension.id) === key);
+                  if (selectedDimension) {
+                    onSelectDimension(selectedDimension);
+                  }
+                },
+              }}
             >
               <span>
                 <span className={`${prefixCls}-content-item-name`}>更多</span>

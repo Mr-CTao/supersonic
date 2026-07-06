@@ -18,6 +18,10 @@ if "%profile%"=="" (
    set "profile=%S2_DB_TYPE%"
 )
 
+if "%profile%"=="" (
+   set "profile=h2"
+)
+
 set "model_name=%service%"
 
 REM fix path configuration - point to the correct release package directory
@@ -60,8 +64,11 @@ if "%command%"=="restart" (
    set "webDir=%releaseDir%\webapp"
    set "logDir=%releaseDir%\logs"
    
-   REM fix variable name matching problem
-   set "CLASSPATH=%releaseDir%;%webDir%;%libDir%\*;%confDir%"
+   REM Keep release root for classpath:/webapp/ and put common first to avoid duplicate LangChain4j classes.
+   set "CLASSPATH=%releaseDir%;%confDir%;%libDir%\common-1.0.0-SNAPSHOT.jar"
+   for %%f in ("%libDir%\*.jar") do (
+       if /I not "%%~nxf"=="common-1.0.0-SNAPSHOT.jar" call set "CLASSPATH=%%CLASSPATH%%;%%~ff"
+   )
    set "MAIN_CLASS=%main_class%"
    
    REM add port configuration

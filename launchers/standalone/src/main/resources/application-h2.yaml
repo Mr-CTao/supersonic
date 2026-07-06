@@ -1,11 +1,14 @@
 spring:
   datasource:
     driver-class-name: org.h2.Driver
-    url: jdbc:h2:mem:semantic;DATABASE_TO_UPPER=false;QUERY_TIMEOUT=30
+    # 使用文件型 H2 保存本地开发配置，避免 Java 进程重启后丢失页面创建的数据库连接和大模型连接。
+    url: jdbc:h2:file:./data/h2/semantic;DATABASE_TO_UPPER=false;QUERY_TIMEOUT=30;AUTO_SERVER=TRUE
     username: root
     password: semantic
   sql:
     init:
+      # 文件库由本地初始化脚本显式灌入一次 demo 数据；后续启动禁用自动初始化，避免重复 INSERT 污染或启动失败。
+      mode: never
       schema-locations: classpath:db/schema-h2.sql,classpath:db/schema-h2-demo.sql
       data-locations: classpath:db/data-h2.sql,classpath:db/data-h2-demo.sql
   h2:

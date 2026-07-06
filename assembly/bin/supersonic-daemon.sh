@@ -16,6 +16,10 @@ if [ -z "$profile" ]; then
   profile=${S2_DB_TYPE}
 fi
 
+if [ -z "$profile" ]; then
+  profile=h2
+fi
+
 model_name=$service
 cd $baseDir
 
@@ -46,9 +50,19 @@ function runJavaService {
   confDir=$baseDir/conf
 
   CLASSPATH=""
-  CLASSPATH=$CLASSPATH:$confDir
+  # Keep the release root on the classpath because WebConfig serves classpath:/webapp/.
+  CLASSPATH=$CLASSPATH:$baseDir:$confDir
+
+  # Load project classes first so patched dev.langchain4j classes in common override dependency jars.
+  commonJarPath=$libDir/common-1.0.0-SNAPSHOT.jar
+  if [ -f "$commonJarPath" ]; then
+   CLASSPATH=$CLASSPATH:$commonJarPath
+  fi
 
   for jarPath in $libDir/*.jar; do
+   if [ "$jarPath" == "$commonJarPath" ]; then
+    continue
+   fi
    CLASSPATH=$CLASSPATH:$jarPath
   done
 
@@ -64,13 +78,22 @@ function runJavaService {
   -Dapp_name=${local_app_name} -Xms1024m -Xmx2048m -XX:+UseZGC -XX:+ZGenerational $main_class"
 
   mkdir -p $javaRunDir/logs
-  java -Dspring.profiles.active="$profile" $command >/dev/null 2>$javaRunDir/logs/error.log &
+  # Detach from the launcher shell and persist stdout; Spring logs normally go to stdout.
+  nohup java -Dspring.profiles.active="$profile" $command \
+    >$javaRunDir/logs/supersonic.out.log 2>$javaRunDir/logs/error.log < /dev/null &
+  echo $! > $javaRunDir/logs/${local_app_name}.pid
+}
+
+function findJavaServicePids {
+  local_app_name=$1
+  # Match the JVM app marker only; plain service-name grep can match the launcher script itself.
+  pgrep -f "Dapp_name=${local_app_name}" 2>/dev/null || true
 }
 
 function start() {
   local_app_name=$1
   echo "Starting ${local_app_name}"
-  pid=$(ps aux | grep ${local_app_name} | grep -v grep | awk '{print $2}')
+  pid=$(findJavaServicePids ${local_app_name} | xargs)
   if [[ "$pid" == "" ]]; then
     runJavaService ${local_app_name}
   else
@@ -82,12 +105,13 @@ function start() {
 
 function stop() {
   echo "Stopping $1"
-  pid=$(ps aux | grep $1 | grep -v grep | awk '{print $2}')
+  pid=$(findJavaServicePids $1 | xargs)
   if [[ "$pid" == "" ]]; then
     echo "Process $1 is not running!"
     return 1
   else
     kill -9 $pid
+    rm -f $baseDir/logs/$1.pid
     echo "Process (PID = $pid) is killed!"
     return 0
   fi

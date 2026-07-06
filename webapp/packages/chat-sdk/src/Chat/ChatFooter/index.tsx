@@ -395,7 +395,7 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
             onBlur={() => {
               setFocused(false);
             }}
-            dropdownClassName={autoCompleteDropdownClass}
+            popupClassName={autoCompleteDropdownClass}
             listHeight={500}
             allowClear
             open={open}

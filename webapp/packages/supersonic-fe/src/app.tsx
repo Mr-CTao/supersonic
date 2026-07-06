@@ -1,3 +1,11 @@
+/**
+ * Supersonic 前端运行时入口。
+ *
+ * 职责：
+ * - 初始化用户态、权限码与运行环境；
+ * - 配置 Umi ProLayout 的顶栏、内容区与全局浮层；
+ * - 为全屏聊天页提供独立的高度和滚动边界，避免页面级滚动影响对话输入区。
+ */
 import RightContent from '@/components/RightContent';
 import S2Icon, { ICON } from '@/components/S2Icon';
 import { Space, Spin, ConfigProvider } from 'antd';
@@ -11,12 +19,56 @@ import { publicPath } from '../config/defaultSettings';
 import type { DefaultSetting } from '../config/defaultSettings';
 import { Copilot } from 'supersonic-chat-sdk';
 import { configProviderTheme } from '../config/themeSettings';
+import type { CSSProperties } from 'react';
 export { request } from './services/request';
 import { BASE_TITLE } from '@/common/constants';
 import { ROUTE_AUTH_CODES } from '../config/routes';
 import AppPage from './pages/index';
 
 const replaceRoute = '/';
+const CHAT_HEADER_OFFSET = 56;
+
+/**
+ * 判断当前路由是否为需要占满视口的聊天页。
+ *
+ * @param pathname 当前浏览器或 Umi 路由路径。
+ * @returns `true` 表示当前页面需要启用聊天页专属高度和滚动约束。
+ */
+const isFullHeightChatRoute = (pathname: string) => {
+  // 本地开源版挂在 /webapp 下运行，统一归一化后再判断，避免全高样式在带 base 路径时失效。
+  const normalizedPathname = pathname.replace(/^\/webapp(?=\/|$)/, '');
+
+  return (
+    normalizedPathname === '/chat' ||
+    normalizedPathname === '/chat/mobile' ||
+    normalizedPathname === '/chat/external'
+  );
+};
+
+/**
+ * 计算聊天页外层容器样式。
+ *
+ * @param pathname 当前浏览器或 Umi 路由路径。
+ * @returns 聊天页使用的高度和溢出控制；非聊天页返回 `undefined`。
+ */
+const getChatPageShellStyle = (pathname: string): CSSProperties | undefined => {
+  if (!isFullHeightChatRoute(pathname)) {
+    return undefined;
+  }
+
+  // /chat 带 ProLayout 顶栏；mobile/external 是 layout:false 页面，不能再扣除顶栏高度。
+  const normalizedPathname = pathname.replace(/^\/webapp(?=\/|$)/, '');
+  const height =
+    normalizedPathname === '/chat' ? `calc(100vh - ${CHAT_HEADER_OFFSET}px)` : '100vh';
+
+  const shellStyle: CSSProperties = {
+    height,
+    minHeight: 0,
+    overflow: 'hidden',
+  };
+
+  return shellStyle;
+};
 
 const getRunningEnv = async () => {
   try {
@@ -140,16 +192,15 @@ export const layout: RunTimeLayoutConfig = (params) => {
     disableContentMargin: true,
     // menuHeaderRender: undefined,
     childrenRender: (dom) => {
+      const pathname = window.location.pathname || history.location.pathname;
+      const chatPageShellStyle = getChatPageShellStyle(pathname);
+
       return (
         <ConfigProvider theme={configProviderTheme}>
-          <div
-            style={{
-              height: location.pathname.includes('chat') ? 'calc(100vh - 56px)' : undefined,
-            }}
-          >
+          <div style={chatPageShellStyle}>
             {/* <AppPage dom={dom} /> */}
             {dom}
-            {history.location.pathname !== '/chat' && !isMobile && (
+            {!isFullHeightChatRoute(pathname) && !isMobile && (
               <Copilot token={getToken() || ''} isDeveloper />
             )}
           </div>

@@ -1,3 +1,11 @@
+/**
+ * 助理列表模块。
+ *
+ * 职责：
+ * - 展示智能助理列表、状态和更新时间；
+ * - 提供进入编辑、新建助理、删除助理和启停助理的入口；
+ * - 为表格指定稳定 rowKey，避免 React 在渲染行时产生 key 警告。
+ */
 import { PlusOutlined } from '@ant-design/icons';
 import { Button, Popconfirm, Switch, Table } from 'antd';
 import moment from 'moment';
@@ -17,6 +25,7 @@ type Props = {
 
 const AgentsSection: React.FC<Props> = ({
   agents,
+  loading,
   onSelectAgent,
   onDeleteAgent,
   onSaveAgent,
@@ -134,7 +143,7 @@ const AgentsSection: React.FC<Props> = ({
             新建助理
           </Button>
         </div>
-        <Table columns={columns} dataSource={showAgents} />
+        <Table rowKey="id" loading={loading} columns={columns} dataSource={showAgents} />
       </div>
     </div>
   );

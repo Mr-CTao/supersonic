@@ -1,3 +1,10 @@
+/**
+ * Copilot 悬浮对话样式。
+ *
+ * 职责：
+ * - 控制右下角机器人入口、对话浮层和浮层箭头的视觉表现；
+ * - 约束 Copilot 面板在后台页面中的尺寸、拖拽反馈和内容滚动边界。
+ */
 .copilot {
   position: fixed;
   right: 8px;
@@ -22,6 +29,11 @@
 
   &.copilotMinimized {
     right: -40px;
+  }
+
+  &.chatOpened {
+    pointer-events: none;
+    opacity: 0;
   }
 
   .minimizeWrapper {
@@ -66,13 +78,15 @@
 .chatPopover {
   position: fixed;
   right: 90px;
-  bottom: 5vh;
+  top: 72px;
+  bottom: 16px;
   z-index: 999;
   display: flex;
   flex-direction: column;
   width: 70vw;
   min-width: 1100px;
-  height: 90vh;
+  max-width: calc(100vw - 130px);
+  min-height: 0;
   overflow: hidden;
   box-shadow: 4px 4px 10px rgba(55, 99, 170, 0.3), -2px -2px 16px rgba(55, 99, 170, 0.3);
   transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out,
@@ -86,6 +100,7 @@
     position: relative;
     z-index: 99;
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     justify-content: center;
     height: 40px;
@@ -93,6 +108,8 @@
     padding-left: 16px;
     background: linear-gradient(81.62deg, #2870ea 8.72%, var(--chat-blue) 85.01%);
     box-shadow: 1px 1px 8px #1b4aef5c;
+    cursor: move;
+    user-select: none;
 
     .title {
       color: #fff;
@@ -108,6 +125,7 @@
       color: #fff;
       font-size: 16px;
       column-gap: 20px;
+      cursor: default;
 
       .close {
         font-size: 18px;
@@ -125,18 +143,29 @@
     }
   }
 
+  &.dragging {
+    transition: none;
+
+    .header {
+      cursor: grabbing;
+    }
+  }
+
   .chat {
-    height: calc(90vh - 40px);
+    flex: 1;
+    min-height: 0;
   }
 
   &.fullscreen {
+    top: 0;
     bottom: 0;
     left: 60px;
     width: calc(100vw - 150px);
     height: 100vh;
 
     .chat {
-      height: calc(100vh - 50px);
+      flex: 1;
+      min-height: 0;
     }
   }
 }
@@ -148,4 +177,8 @@
   z-index: 999;
   color: var(--chat-blue);
   font-size: 30px;
+
+  &.hidden {
+    display: none;
+  }
 }

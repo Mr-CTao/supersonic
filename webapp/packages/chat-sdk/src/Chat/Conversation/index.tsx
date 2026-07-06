@@ -1,4 +1,4 @@
-import { Dropdown, Input, Menu } from 'antd';
+import { Dropdown, Input } from 'antd';
 import classNames from 'classnames';
 import {
   useEffect,
@@ -159,17 +159,15 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
               return (
                 <Dropdown
                   key={item.chatId}
-                  overlay={
-                    <Menu
-                      items={[
-                        { label: '修改对话名称', key: 'editName' },
-                        { label: '删除', key: 'delete' },
-                      ]}
-                      onClick={({ key }) => {
-                        onOperate(key, item);
-                      }}
-                    />
-                  }
+                  menu={{
+                    items: [
+                      { label: '修改对话名称', key: 'editName' },
+                      { label: '删除', key: 'delete' },
+                    ],
+                    onClick: ({ key }) => {
+                      onOperate(key, item);
+                    },
+                  }}
                   trigger={['contextMenu']}
                 >
                   <div
