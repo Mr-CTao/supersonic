@@ -7,8 +7,8 @@
  * - 为全屏聊天页提供独立的高度和滚动边界，避免页面级滚动影响对话输入区。
  */
 import RightContent from '@/components/RightContent';
-import S2Icon, { ICON } from '@/components/S2Icon';
-import { Space, Spin, ConfigProvider } from 'antd';
+import BrandLogo from '@/components/BrandLogo';
+import { Spin, ConfigProvider } from 'antd';
 import ScaleLoader from 'react-spinners/ScaleLoader';
 import { history, RunTimeLayoutConfig } from '@umijs/max';
 import defaultSettings from '../config/defaultSettings';
@@ -174,19 +174,7 @@ export const layout: RunTimeLayoutConfig = (params) => {
       e.preventDefault();
       history.push(replaceRoute);
     },
-    logo: (
-      <Space>
-        <S2Icon
-          icon={ICON.iconlogobiaoshi}
-          size={30}
-          color="#1672fa"
-          style={{ display: 'inline-block', marginTop: 8 }}
-        />
-        <div className="logo" style={{ position: 'relative', top: '-2px' }}>
-          SuperSonic
-        </div>
-      </Space>
-    ),
+    logo: <BrandLogo size="header" />,
     contentStyle: { ...(initialState?.contentStyle || {}) },
     rightContentRender: () => <RightContent />,
     disableContentMargin: true,

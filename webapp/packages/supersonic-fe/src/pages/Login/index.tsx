@@ -1,11 +1,19 @@
+/**
+ * 登录页模块。
+ *
+ * 职责：
+ * - 承载用户登录与注册入口；
+ * - 登录成功后写入认证令牌并刷新当前用户状态；
+ * - 展示当前系统品牌 Logo，保证登录页与主框架头部品牌一致。
+ */
 // import type { FC } from 'react';
 import styles from './style.less';
-import { Button, Form, Input, message, Space } from 'antd';
+import BrandLogo from '@/components/BrandLogo';
+import { Button, Form, Input, message } from 'antd';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import RegisterForm from './components/RegisterForm';
 // import ForgetPwdForm from './components/ForgetPwdForm';
 import { ROUTE_AUTH_CODES } from '../../../config/routes';
-import S2Icon, { ICON } from '@/components/S2Icon';
 import React, { useState } from 'react';
 import { useForm } from 'antd/lib/form/Form';
 import type { RegisterFormDetail } from './components/types';
@@ -92,15 +100,7 @@ const LoginPage: React.FC = () => {
             <Form form={form} labelCol={{ span: 6 }} colon={false}>
               <div className={styles.loginMain}>
                 <h3 className={styles.title}>
-                  <Space>
-                    <S2Icon
-                      icon={ICON.iconlogobiaoshi}
-                      size={30}
-                      color="#296DF3"
-                      style={{ display: 'inline-block', marginTop: 8 }}
-                    />
-                    <div>SuperSonic</div>
-                  </Space>
+                  <BrandLogo size="login" />
                 </h3>
                 <Item name="name" rules={[{ required: true }]} label="">
                   <Input size="large" placeholder="用户名: admin" prefix={<UserOutlined />} />
