@@ -46,6 +46,20 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * 标签元数据服务实现。
+ *
+ * <p>职责：
+ * <ul>
+ *   <li>维护 `s2_tag` 中标签到维度、指标等语义元素的映射；</li>
+ *   <li>补全标签市场展示所需的模型、主题域、标签对象、收藏和管理权限信息；</li>
+ *   <li>在标签功能通过前端开关启用后，保障新建库可以完成标签创建、编辑和查询闭环。</li>
+ * </ul>
+ *
+ * <p>并发说明：本类不持有可变共享集合或缓存，单例服务自身是无状态的。
+ * 标签写入依赖数据库主键和更新语句保障原子性；当前表没有 RowVersion，
+ * 因此同一标签的并发编辑采用后写覆盖先写的策略。
+ */
 @Service
 @Slf4j
 public class TagMetaServiceImpl implements TagMetaService {
@@ -83,6 +97,46 @@ public class TagMetaServiceImpl implements TagMetaService {
         tagDO.setUpdatedBy(user.getName());
         tagDO.setUpdatedAt(date);
         tagRepository.create(tagDO);
+        return getTag(tagDO.getId(), user);
+    }
+
+    /**
+     * 更新标签映射。
+     *
+     * <p>调用示例：
+     * <pre>{@code
+     * TagReq req = new TagReq();
+     * req.setId(10L);
+     * req.setTagDefineType(TagDefineType.DIMENSION);
+     * req.setItemId(1001L);
+     * tagMetaService.update(req, user);
+     * }</pre>
+     *
+     * @param tagReq 标签更新请求，必须包含已有标签 ID。
+     * @param user 当前操作用户。
+     * @return 更新后的标签详情。
+     * @throws IllegalArgumentException 当标签 ID 为空时抛出。
+     * @throws RuntimeException 当标签不存在、重复或缺少标签对象绑定时抛出。
+     */
+    @Override
+    public TagResp update(TagReq tagReq, User user) {
+        if (Objects.isNull(tagReq.getId())) {
+            throw new IllegalArgumentException("tag id can not be null");
+        }
+        TagDO existTag = tagRepository.getTagById(tagReq.getId());
+        if (Objects.isNull(existTag)) {
+            throw new RuntimeException(String.format("the tag is not exist, id:%s", tagReq.getId()));
+        }
+
+        checkExist(tagReq, tagReq.getId());
+        checkTagObject(tagReq);
+
+        TagDO tagDO = convert(tagReq);
+        Date date = new Date();
+        tagDO.setUpdatedBy(user.getName());
+        tagDO.setUpdatedAt(date);
+        // s2_tag 只保存映射和审计信息，名称/描述来自关联的维度或指标，避免在此处制造重复元数据。
+        tagRepository.update(tagDO);
         return getTag(tagDO.getId(), user);
     }
 
@@ -354,7 +408,24 @@ public class TagMetaServiceImpl implements TagMetaService {
         }
     }
 
+    /**
+     * 校验同一语义元素是否已经被创建为同类型标签。
+     *
+     * @param tagReq 标签请求。
+     * @throws RuntimeException 当创建场景发现重复标签时抛出。
+     */
     private void checkExist(TagReq tagReq) {
+        checkExist(tagReq, null);
+    }
+
+    /**
+     * 校验同一语义元素是否已经被创建为同类型标签。
+     *
+     * @param tagReq 标签请求。
+     * @param excludeTagId 更新场景需要排除的当前标签 ID；创建场景传 `null`。
+     * @throws RuntimeException 当存在其他重复标签时抛出。
+     */
+    private void checkExist(TagReq tagReq, Long excludeTagId) {
         TagFilter tagFilter = new TagFilter();
         tagFilter.setTagDefineType(tagReq.getTagDefineType());
         if (Objects.nonNull(tagReq.getItemId())) {
@@ -362,7 +433,10 @@ public class TagMetaServiceImpl implements TagMetaService {
         }
 
         List<TagDO> tagRespList = tagRepository.getTagDOList(tagFilter);
-        if (!CollectionUtils.isEmpty(tagRespList)) {
+        boolean hasDuplicate = !CollectionUtils.isEmpty(tagRespList) && tagRespList.stream()
+                .anyMatch(tagDO -> Objects.isNull(excludeTagId)
+                        || !excludeTagId.equals(tagDO.getId()));
+        if (hasDuplicate) {
             throw new RuntimeException(
                     String.format("the tag is exit, itemId:%s", tagReq.getItemId()));
         }

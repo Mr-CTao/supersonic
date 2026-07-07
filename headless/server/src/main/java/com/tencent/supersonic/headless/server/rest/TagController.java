@@ -26,6 +26,19 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/**
+ * 标签元数据 REST 接口。
+ *
+ * <p>职责：
+ * <ul>
+ *   <li>承接标签市场、标签详情和标签对象链路中的标签增删改查请求；</li>
+ *   <li>在 Controller 层解析当前用户，统一交由 Service 层处理权限和业务校验；</li>
+ *   <li>保持二开开启标签功能后，前端现有标签编辑调用具备对应后端入口。</li>
+ * </ul>
+ *
+ * <p>并发说明：Controller 不保存共享可变状态，线程安全由 Spring 单例无状态约束保障；
+ * 具体写入一致性依赖 Service 与 Repository 的数据库写入语义。
+ */
 @RestController
 @RequestMapping("/api/semantic/tag")
 public class TagController {
@@ -52,6 +65,32 @@ public class TagController {
             HttpServletResponse response) throws Exception {
         User user = UserHolder.findUser(request, response);
         return tagMetaService.create(tagReq, user);
+    }
+
+    /**
+     * 编辑标签映射。
+     *
+     * <p>调用示例：
+     * <pre>{@code
+     * POST /api/semantic/tag/update
+     * {
+     *   "id": 10,
+     *   "tagDefineType": "DIMENSION",
+     *   "itemId": 1001
+     * }
+     * }</pre>
+     *
+     * @param tagReq 标签更新请求，必须包含已有标签 ID、标签定义类型和关联项 ID。
+     * @param request HTTP 请求，用于解析当前用户。
+     * @param response HTTP 响应，用于兼容现有用户解析逻辑。
+     * @return 更新后的标签详情。
+     * @throws Exception 当用户解析、标签不存在或标签对象绑定校验失败时抛出。
+     */
+    @PostMapping("/update")
+    public TagResp update(@RequestBody @Valid TagReq tagReq, HttpServletRequest request,
+            HttpServletResponse response) throws Exception {
+        User user = UserHolder.findUser(request, response);
+        return tagMetaService.update(tagReq, user);
     }
 
     /**

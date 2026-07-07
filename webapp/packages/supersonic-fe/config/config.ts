@@ -1,3 +1,11 @@
+/**
+ * Supersonic 前端构建配置模块。
+ *
+ * 职责：
+ * - 统一定义 Umi Max 的构建、路由、主题、代理与输出目录配置；
+ * - 将后端 API 地址和二开特性开关注入到浏览器运行时代码；
+ * - 保持标签能力默认关闭，同时允许二开部署通过环境变量显式开启。
+ */
 // https://umijs.org/config/
 import { defineConfig } from '@umijs/max';
 import path from 'path';
@@ -9,6 +17,46 @@ const { REACT_APP_ENV = 'dev', RUN_TYPE } = process.env;
 
 import ENV_CONFIG from './envConfig';
 
+/**
+ * 将环境变量解析成布尔特性开关。
+ *
+ * @param value 环境变量原始值，支持 boolean、number 和 string。
+ * @param defaultValue 未显式配置时使用的默认值。
+ * @returns `true` 表示特性启用，`false` 表示特性关闭。
+ * @throws 不主动抛出异常；未知值会回退到 `defaultValue`，避免构建因拼写错误中断。
+ *
+ * @example
+ * parseFeatureFlag('true', false) // true
+ * parseFeatureFlag('0', true) // false
+ */
+const parseFeatureFlag = (value: unknown, defaultValue = false): boolean => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+  if (typeof value !== 'string') {
+    return defaultValue;
+  }
+
+  const normalizedValue = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalizedValue)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalizedValue)) {
+    return false;
+  }
+
+  return defaultValue;
+};
+
+// 标签体系默认不暴露给普通开源构建；二开场景可通过 SHOW_TAG=true 或 REACT_APP_SHOW_TAG=true 显式开启。
+const showTagFeatureEnabled = parseFeatureFlag(
+  process.env.SHOW_TAG ?? process.env.REACT_APP_SHOW_TAG,
+  false,
+);
+
 export default defineConfig({
   define: {
     // 添加这个自定义的环境变量
@@ -18,8 +66,8 @@ export default defineConfig({
       API_BASE_URL: '/api/semantic/', // 直接在define中挂载裸露的全局变量还需要配置eslint，ts相关配置才能导致在使用中不会飘红，冗余较高，这里挂在进程环境下
       CHAT_API_BASE_URL: '/api/chat/',
       AUTH_API_BASE_URL: '/api/auth/',
-      SHOW_TAG: false,
       ...ENV_CONFIG,
+      SHOW_TAG: showTagFeatureEnabled,
     },
   },
   metas: [

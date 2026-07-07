@@ -1,3 +1,11 @@
+/**
+ * 标签对象创建与编辑弹窗。
+ *
+ * 职责：
+ * - 提供标签对象名称、英文名称和描述的表单录入；
+ * - 根据是否存在 `tagItem.id` 自动选择创建或更新接口；
+ * - 在标签能力开启后支撑“主题域 -> 标签对象 -> 模型绑定 -> 标签市场”的基础配置链路。
+ */
 import React, { useEffect, useRef } from 'react';
 import { Form, Button, Modal, Steps, Input, Select, message } from 'antd';
 
@@ -71,11 +79,17 @@ const TagObjectCreateForm: React.FC<CreateFormProps> = ({
     }
   }, [tagItem]);
 
+  /**
+   * 保存标签对象表单。
+   *
+   * @param fieldsValue 已通过表单校验的标签对象字段。
+   * @returns 保存完成后无显式返回；成功时触发父组件刷新。
+   * @throws 表单校验异常由调用方 `handleNext` 透传给 Ant Design Form。
+   */
   const saveTag = async (fieldsValue: any) => {
     const queryParams = {
       domainId: isEdit ? tagItem.domainId : domainId,
       ...fieldsValue,
-      typeEnum: 'TAG_OBJECT',
     };
 
     let saveTagQuery = createTagObject;
