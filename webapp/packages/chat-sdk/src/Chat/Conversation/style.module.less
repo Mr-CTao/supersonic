@@ -1,11 +1,29 @@
+/**
+ * 历史对话侧栏样式模块。
+ *
+ * 职责：
+ * - 控制问答页右侧历史对话面板的展开、收起和列表布局；
+ * - 在收起态保留组件实例，避免影响父组件通过 ref 刷新会话数据；
+ * - 通过宽度归零和内容裁剪保证隐藏态不会在页面右侧残留可见区域。
+ */
+@historyConversationWidth: 400px;
+
 .conversation {
   position: relative;
-  width: 248px;
+  flex: 0 0 0;
+  box-sizing: border-box;
+  width: 0;
+  min-width: 0;
   height: 100%;
   background: #f9f9f9;
-  padding: 10px 10px;
-  border-right: 1px solid #f1f1f1;
-
+  padding: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    width 0.2s ease,
+    flex-basis 0.2s ease,
+    padding 0.2s ease;
 
   .rightSection {
     width: 100%;
@@ -166,9 +184,14 @@
   }
 
   &.historyVisible {
-    width: 400px;
+    // 收起态仍挂载组件供父级 ref 调用；展开时再恢复固定宽度，避免右侧漏出半截面板。
+    flex-basis: @historyConversationWidth;
+    width: @historyConversationWidth;
+    min-width: @historyConversationWidth;
     padding: 10px 16px;
     border-left: 1px solid #f1f1f1;
     z-index: 99;
+    visibility: visible;
+    pointer-events: auto;
   }
 }
