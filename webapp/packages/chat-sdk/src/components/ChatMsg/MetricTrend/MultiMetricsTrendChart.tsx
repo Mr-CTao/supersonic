@@ -1,13 +1,23 @@
+/**
+ * 模块说明：ChatMsg 多指标趋势图组件。
+ * 职责描述：将多个指标的时间序列查询结果渲染到同一 ECharts 图表，并规整指标名与数值，避免图例或 series 出现异常值。
+ */
+
 import { CHART_SECONDARY_COLOR, CLS_PREFIX, THEME_COLOR_LIST } from '../../../common/constants';
 import { getFormattedValue } from '../../../utils/utils';
 import type { ECharts } from 'echarts';
 import * as echarts from 'echarts';
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import moment from 'moment';
 import { ColumnType } from '../../../common/type';
 import { isArray } from 'lodash';
 import { ChartItemContext } from '../../ChatItem';
 import { useExportByEcharts } from '../../../hooks';
+import {
+  getSortableChartValue,
+  normalizeChartCategoryName,
+  normalizeTrendMetricValue,
+} from '../chartData';
 
 type Props = {
   dateColumnName: string;
@@ -18,6 +28,18 @@ type Props = {
   question: string;
 };
 
+/**
+ * 渲染多指标趋势图。
+ *
+ * @param props.dateColumnName 时间字段名。
+ * @param props.metricFields 指标字段列表，每个指标对应一个 series。
+ * @param props.resultList 查询结果列表。
+ * @param props.triggerResize 外部布局变化时触发 ECharts resize 的标记。
+ * @param props.chartType ECharts series 类型，通常为 line 或 bar。
+ * @param props.question 当前问题文案，用于导出文件名。
+ * @returns 多指标趋势图容器。
+ * @throws 不主动抛出异常；空指标名会兜底，非法指标值会以断点形式进入趋势图。
+ */
 const MultiMetricsTrendChart: React.FC<Props> = ({
   dateColumnName,
   metricFields,
@@ -28,6 +50,7 @@ const MultiMetricsTrendChart: React.FC<Props> = ({
 }) => {
   const chartRef = useRef<any>();
   const instanceRef = useRef<ECharts>();
+  // 将多指标查询结果规整成 ECharts series，非法数值以断点展示，避免 NaN 参与绘制。
   const renderChart = () => {
     let instanceObj: any;
     if (!instanceRef.current) {
@@ -91,7 +114,7 @@ const MultiMetricsTrendChart: React.FC<Props> = ({
         formatter: function (params: any[]) {
           const param = params[0];
           const valueLabels = params
-            .sort((a, b) => b.value - a.value)
+            .sort((a, b) => getSortableChartValue(b.value) - getSortableChartValue(a.value))
             .map(
               (item: any) =>
                 `<div style="margin-top: 3px;">${
@@ -99,7 +122,9 @@ const MultiMetricsTrendChart: React.FC<Props> = ({
                 } <span style="display: inline-block; width: 70px; margin-right: 12px;">${
                   item.seriesName
                 }</span><span style="display: inline-block; width: 90px; text-align: right; font-weight: 500;">${
-                  item.value === '' ? '-' : getFormattedValue(item.value)
+                  item.value === '' || item.value === null || item.value === undefined
+                    ? '-'
+                    : getFormattedValue(item.value)
                 }</span></div>`
             )
             .join('');
@@ -116,17 +141,12 @@ const MultiMetricsTrendChart: React.FC<Props> = ({
       series: metricFields.map((metricField, index) => {
         return {
           type: chartType,
-          name: metricField.name,
+          name: normalizeChartCategoryName(metricField.name, metricField.bizName || '指标'),
           symbol: 'circle',
           showSymbol: resultList.length === 1,
           smooth: true,
           data: resultList.map((item: any) => {
-            const value = item[metricField.bizName];
-            return (metricField.dataFormatType === 'percent' ||
-              metricField.dataFormatType === 'decimal') &&
-              metricField.dataFormat?.needMultiply100
-              ? value * 100
-              : value;
+            return normalizeTrendMetricValue(item[metricField.bizName], metricField);
           }),
           color: THEME_COLOR_LIST[index],
         };

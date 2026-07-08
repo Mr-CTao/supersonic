@@ -1,3 +1,8 @@
+/**
+ * 模块说明：ChatMsg 问答结果内容分发组件。
+ * 职责描述：根据查询结果的字段类型、数据规模和展示模式选择文本、表格、指标卡、趋势图、柱状图或饼图。
+ */
+
 import Bar from './Bar';
 import MetricCard from './MetricCard';
 import MetricTrend from './MetricTrend';
@@ -13,6 +18,7 @@ import DrillDownDimensions from '../DrillDownDimensions';
 import MetricOptions from '../MetricOptions';
 import { isMobile } from '../../utils/utils';
 import Pie from './Pie';
+import { isRenderableMetricValue, isRenderablePieMetricValue } from './chartData';
 
 type Props = {
   queryId?: number;
@@ -25,6 +31,20 @@ type Props = {
   onMsgContentTypeChange: (msgContentType: MsgContentTypeEnum) => void;
 };
 
+/**
+ * 根据问答结果选择并渲染合适的内容形态。
+ *
+ * @param props.queryId 当前查询 ID，用于二次查询。
+ * @param props.question 用户问题文本。
+ * @param props.data 问答返回数据。
+ * @param props.chartIndex 当前图表序号，用于部分图表/表格交错展示策略。
+ * @param props.triggerResize 外部布局变化时触发子图表 resize 的标记。
+ * @param props.forceShowTable 是否强制使用表格展示。
+ * @param props.isSimpleMode 是否使用简单 Markdown 模式。
+ * @param props.onMsgContentTypeChange 内容类型变化回调。
+ * @returns 问答结果内容节点。
+ * @throws 不主动抛出异常；异常数据会优先回退到表格或在图表组件内规整。
+ */
 const ChatMsg: React.FC<Props> = ({
   queryId,
   question,
@@ -134,7 +154,7 @@ const ChatMsg: React.FC<Props> = ({
       categoryField.length > 0 &&
       metricFields?.length === 1 &&
       (isMobile ? dataSource?.length <= 5 : dataSource?.length <= 10) &&
-      dataSource.every(item => item[metricFields[0].bizName] >= 0);
+      dataSource.every(item => isRenderablePieMetricValue(item[metricFields[0].bizName]));
 
     if (isMetricPie) {
       return MsgContentTypeEnum.METRIC_PIE;
@@ -153,7 +173,7 @@ const ChatMsg: React.FC<Props> = ({
       categoryField?.length > 0 &&
       metricFields?.length === 1 &&
       (isMobile ? dataSource?.length <= 5 : dataSource?.length <= 50) &&
-      dataSource.every(item => isFinite(Number(item[metricFields[0].bizName])));
+      dataSource.every(item => isRenderableMetricValue(item[metricFields[0].bizName]));
 
     if (isMetricBar) {
       return MsgContentTypeEnum.METRIC_BAR;

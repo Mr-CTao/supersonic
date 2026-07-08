@@ -1,3 +1,8 @@
+/**
+ * 模块说明：ChatMsg 单指标趋势图组件。
+ * 职责描述：将时间序列查询结果渲染为 ECharts 折线图或柱状图，并统一规整图例分类、时间轴数据和指标值。
+ */
+
 import { CHART_SECONDARY_COLOR, CLS_PREFIX, THEME_COLOR_LIST } from '../../../common/constants';
 import {
   formatByDataFormatType,
@@ -8,7 +13,7 @@ import {
 } from '../../../utils/utils';
 import type { ECharts } from 'echarts';
 import * as echarts from 'echarts';
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import moment from 'moment';
 import { ColumnType } from '../../../common/type';
 import NoPermissionChart from '../NoPermissionChart';
@@ -16,6 +21,11 @@ import classNames from 'classnames';
 import { isArray } from 'lodash';
 import { useExportByEcharts } from '../../../hooks';
 import { ChartItemContext } from '../../ChatItem';
+import {
+  getSortableChartValue,
+  normalizeChartCategoryName,
+  normalizeTrendMetricValue,
+} from '../chartData';
 
 type Props = {
   model?: string;
@@ -28,6 +38,22 @@ type Props = {
   chartType?: string;
 };
 
+const DEFAULT_TREND_CATEGORY_FIELD = '__chartTrendCategory';
+
+/**
+ * 渲染单指标趋势图。
+ *
+ * @param props.model 当前数据模型名称，用于无权限提示。
+ * @param props.dateColumnName 时间字段名。
+ * @param props.categoryColumnName 可选分类字段名；为空时渲染单序列趋势。
+ * @param props.metricField 指标字段配置。
+ * @param props.resultList 查询结果列表。
+ * @param props.triggerResize 外部布局变化时触发 ECharts resize 的标记。
+ * @param props.onApplyAuth 无权限时申请权限的回调。
+ * @param props.chartType ECharts series 类型，通常为 line 或 bar。
+ * @returns 趋势图或无权限占位图。
+ * @throws 不主动抛出异常；空分类会兜底，非法指标值会以断点形式进入趋势图。
+ */
 const MetricTrendChart: React.FC<Props> = ({
   model,
   dateColumnName,
@@ -41,6 +67,7 @@ const MetricTrendChart: React.FC<Props> = ({
   const chartRef = useRef<any>();
   const instanceRef = useRef<ECharts>();
 
+  // 将查询结果规整成 ECharts 趋势图数据，空分类统一兜底，非法数值以断点展示。
   const renderChart = () => {
     let instanceObj: any;
     if (!instanceRef.current) {
@@ -52,16 +79,20 @@ const MetricTrendChart: React.FC<Props> = ({
     }
 
     const valueColumnName = metricField.bizName;
+    const groupColumnName = categoryColumnName || DEFAULT_TREND_CATEGORY_FIELD;
     const dataSource = resultList.map((item: any) => {
       return {
         ...item,
+        [groupColumnName]: categoryColumnName
+          ? normalizeChartCategoryName(item[categoryColumnName])
+          : normalizeChartCategoryName(metricField.name, metricField.bizName || '指标'),
         [dateColumnName]: Array.isArray(item[dateColumnName])
           ? moment(item[dateColumnName].join('')).format('MM-DD')
           : item[dateColumnName],
       };
     });
 
-    const groupDataValue = groupByColumn(dataSource, categoryColumnName);
+    const groupDataValue = groupByColumn(dataSource, groupColumnName);
     const [startDate, endDate] = getMinMaxDate(dataSource, dateColumnName);
     const groupData = Object.keys(groupDataValue).reduce((result: any, key) => {
       result[key] =
@@ -81,10 +112,9 @@ const MetricTrendChart: React.FC<Props> = ({
     }, {});
 
     const sortedGroupKeys = Object.keys(groupData).sort((a, b) => {
-      return (
-        groupData[b][groupData[b].length - 1][valueColumnName] -
-        groupData[a][groupData[a].length - 1][valueColumnName]
-      );
+      const aLastValue = groupData[a]?.[groupData[a].length - 1]?.[valueColumnName];
+      const bLastValue = groupData[b]?.[groupData[b].length - 1]?.[valueColumnName];
+      return getSortableChartValue(bLastValue) - getSortableChartValue(aLastValue);
     });
 
     const xData = groupData[sortedGroupKeys[0]]?.map((item: any) => {
@@ -95,14 +125,17 @@ const MetricTrendChart: React.FC<Props> = ({
     });
 
     instanceObj.setOption({
-      legend: categoryColumnName && {
-        left: 0,
-        top: 0,
-        icon: 'rect',
-        itemWidth: 15,
-        itemHeight: 5,
-        type: 'scroll',
-      },
+      legend: categoryColumnName
+        ? {
+          left: 0,
+          top: 0,
+          icon: 'rect',
+          itemWidth: 15,
+          itemHeight: 5,
+          type: 'scroll',
+          data: sortedGroupKeys.slice(0, 20),
+        }
+        : undefined,
       xAxis: {
         type: 'category',
         axisTick: {
@@ -144,7 +177,7 @@ const MetricTrendChart: React.FC<Props> = ({
         formatter: function (params: any[]) {
           const param = params[0];
           const valueLabels = params
-            .sort((a, b) => b.value - a.value)
+            .sort((a, b) => getSortableChartValue(b.value) - getSortableChartValue(a.value))
             .map(
               (item: any) =>
                 `<div style="margin-top: 3px;">${
@@ -152,7 +185,7 @@ const MetricTrendChart: React.FC<Props> = ({
                 } <span style="display: inline-block; width: 70px; margin-right: 12px;">${
                   item.seriesName
                 }</span><span style="display: inline-block; width: 90px; text-align: right; font-weight: 500;">${
-                  item.value === ''
+                  item.value === '' || item.value === null || item.value === undefined
                     ? '-'
                     : metricField.dataFormatType === 'percent' ||
                       metricField.dataFormatType === 'decimal'
@@ -175,17 +208,14 @@ const MetricTrendChart: React.FC<Props> = ({
         const data = groupData[category];
         return {
           type: chartType,
-          name: categoryColumnName ? category : metricField.name,
+          name: categoryColumnName
+            ? category
+            : normalizeChartCategoryName(metricField.name, metricField.bizName || '指标'),
           symbol: 'circle',
           showSymbol: data.length === 1,
           smooth: true,
           data: data.map((item: any) => {
-            const value = item[valueColumnName];
-            return (metricField.dataFormatType === 'percent' ||
-              metricField.dataFormatType === 'decimal') &&
-              metricField.dataFormat?.needMultiply100
-              ? value * 100
-              : value;
+            return normalizeTrendMetricValue(item[valueColumnName], metricField);
           }),
           color: THEME_COLOR_LIST[index],
         };

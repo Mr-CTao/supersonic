@@ -1,3 +1,8 @@
+/**
+ * 模块说明：ChatMsg 柱状图组件。
+ * 职责描述：将单指标聚合查询结果渲染为 ECharts 柱状图，并在渲染前规整分类名和指标值，避免异常数据影响图表展示。
+ */
+
 import { CHART_BLUE_COLOR, CHART_SECONDARY_COLOR, PREFIX_CLS } from '../../../common/constants';
 import { MsgDataType } from '../../../common/type';
 import {
@@ -7,19 +12,13 @@ import {
 } from '../../../utils/utils';
 import type { ECharts } from 'echarts';
 import * as echarts from 'echarts';
-import {
-  forwardRef,
-  ForwardRefRenderFunction,
-  useContext,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-} from 'react';
+import { useContext, useEffect, useRef } from 'react';
 import NoPermissionChart from '../NoPermissionChart';
 import { ColumnType } from '../../../common/type';
 import { Spin } from 'antd';
 import { ChartItemContext } from '../../ChatItem';
 import { useExportByEcharts } from '../../../hooks';
+import { normalizeChartCategoryName, toFiniteChartNumber } from '../chartData';
 
 type Props = {
   data: MsgDataType;
@@ -30,9 +29,21 @@ type Props = {
   onApplyAuth?: (model: string) => void;
 };
 
+/**
+ * 渲染聚合结果柱状图。
+ *
+ * @param props.data 问答查询结果，包含 queryColumns 和 queryResults。
+ * @param props.question 当前问题文案，用于图表标题和导出文件名。
+ * @param props.triggerResize 外部布局变化时触发 ECharts resize 的标记。
+ * @param props.loading 查询或二次加载状态。
+ * @param props.metricField 柱状图数值字段。
+ * @param props.onApplyAuth 无权限时申请权限的回调。
+ * @returns 柱状图或无权限占位图。
+ * @throws 不主动抛出异常；非法指标值会被过滤，空分类会显示为“未知”。
+ */
 const BarChart: React.FC<Props> = ({
   data,
-  question="",
+  question = "",
   triggerResize,
   loading,
   metricField,
@@ -48,6 +59,7 @@ const BarChart: React.FC<Props> = ({
   const metricColumn = queryColumns?.find(column => column.showType === 'NUMBER');
   const metricColumnName = metricColumn?.bizName || '';
 
+  // 将查询结果规整成 ECharts 柱状图数据，非法指标值不参与图表渲染但仍保留在表格视图中。
   const renderChart = () => {
     let instanceObj: any;
     if (!instanceRef.current) {
@@ -56,10 +68,19 @@ const BarChart: React.FC<Props> = ({
     } else {
       instanceObj = instanceRef.current;
     }
-    const data = (queryResults || []);
-    const xData = data.map(item =>
-      item[categoryColumnName] !== undefined ? item[categoryColumnName] : '未知'
-    );
+    const data = queryResults || [];
+    const chartData = data.reduce<any[]>((result, item) => {
+      const value = toFiniteChartNumber(item[metricColumnName]);
+      if (value === undefined) {
+        return result;
+      }
+      result.push({
+        name: normalizeChartCategoryName(item[categoryColumnName]),
+        value,
+      });
+      return result;
+    }, []);
+    const xData = chartData.map(item => item.name);
     instanceObj.setOption({
       xAxis: {
         type: 'category',
@@ -152,9 +173,7 @@ const BarChart: React.FC<Props> = ({
               : getFormattedValue(value);
           },
         },
-        data: data.map(item => {
-          return item[metricColumn?.bizName || ''];
-        }),
+        data: chartData.map(item => item.value),
       },
     });
     instanceObj.resize();
@@ -172,16 +191,6 @@ const BarChart: React.FC<Props> = ({
     }
   }, [triggerResize]);
 
-  if (metricColumn && !metricColumn?.authorized) {
-    return (
-      <NoPermissionChart
-        model={entityInfo?.dataSetInfo.name || ''}
-        chartType="barChart"
-        onApplyAuth={onApplyAuth}
-      />
-    );
-  }
-
   const prefixCls = `${PREFIX_CLS}-bar`;
 
   const { downloadChartAsImage } = useExportByEcharts({
@@ -192,6 +201,16 @@ const BarChart: React.FC<Props> = ({
   const { register } = useContext(ChartItemContext);
 
   register('downloadChartAsImage', downloadChartAsImage);
+
+  if (metricColumn && !metricColumn?.authorized) {
+    return (
+      <NoPermissionChart
+        model={entityInfo?.dataSetInfo.name || ''}
+        chartType="barChart"
+        onApplyAuth={onApplyAuth}
+      />
+    );
+  }
 
   return (
     <div>
