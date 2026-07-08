@@ -25,3 +25,4 @@ assembly/build/*-SNAPSHOT
 benchmark/res/
 data/h2/
 output/
+docs/
