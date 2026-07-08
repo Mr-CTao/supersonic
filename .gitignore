@@ -1,6 +1,7 @@
 target/
 .idea/
 .vscode/
+.serena/
 logs/
 log/
 *.DS_Store
@@ -22,3 +23,5 @@ __pycache__/
 assembly/build/*-SNAPSHOT
 **/node_modules/
 benchmark/res/
+data/h2/
+output/
