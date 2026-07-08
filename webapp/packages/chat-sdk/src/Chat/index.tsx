@@ -1,9 +1,14 @@
+/**
+ * 模块说明：SuperSonic 聊天主容器。
+ * 职责描述：管理智能助理、会话列表、消息发送和历史对话覆盖层等核心交互。
+ */
 import { updateMessageContainerScroll, isMobile, uuid, setToken } from '../utils/utils';
 import {
   ForwardRefRenderFunction,
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useCallback,
   useRef,
   useState,
 } from 'react';
@@ -57,6 +62,11 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   },
   ref
 ) => {
+  type MessageScrollSnapshot = {
+    distanceToBottom: number;
+    wasNearBottom: boolean;
+  };
+
   const [messageList, setMessageList] = useState<MessageItem[]>([]);
   const [inputMsg, setInputMsg] = useState('');
   const [pageNo, setPageNo] = useState(1);
@@ -71,12 +81,23 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   const [mobileAgentsVisible, setMobileAgentsVisible] = useState(false);
   const [agentListVisible, setAgentListVisible] = useState(true);
   const [showCaseVisible, setShowCaseVisible] = useState(false);
+  const [layoutResizeSignal, setLayoutResizeSignal] = useState(0);
 
   const [isSimpleMode, setIsSimpleMode] = useState<boolean>(false);
   const [isDebugMode, setIsDebugMode] = useState<boolean>(true);
 
   const conversationRef = useRef<any>();
   const chatFooterRef = useRef<any>();
+  const messageScrollSnapshotRef = useRef<MessageScrollSnapshot>();
+  const layoutTransitionEndTimerRef = useRef<number>();
+
+  useEffect(() => {
+    return () => {
+      if (layoutTransitionEndTimerRef.current !== undefined && typeof window !== 'undefined') {
+        window.clearTimeout(layoutTransitionEndTimerRef.current);
+      }
+    };
+  }, []);
 
   useImperativeHandle(ref, () => ({
     sendCopilotMsg,
@@ -346,7 +367,73 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     }
   };
 
+  /**
+   * 记录历史面板切换前的消息区阅读位置。
+   *
+   * @returns 无返回值。
+   * @throws 不主动抛出异常；消息容器不存在时直接跳过。
+   */
+  const captureMessageScrollSnapshot = useCallback(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const ele = document.getElementById('messageContainer');
+    if (!ele) {
+      return;
+    }
+    const distanceToBottom = ele.scrollHeight - ele.scrollTop - ele.clientHeight;
+    messageScrollSnapshotRef.current = {
+      distanceToBottom,
+      wasNearBottom: distanceToBottom <= 4,
+    };
+  }, []);
+
+  /**
+   * 恢复历史面板切换后的消息区阅读位置。
+   *
+   * @returns 无返回值。
+   * @throws 不主动抛出异常；消息容器或快照不存在时直接跳过。
+   */
+  const restoreMessageScrollSnapshot = useCallback(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const ele = document.getElementById('messageContainer');
+    const snapshot = messageScrollSnapshotRef.current;
+    if (!ele || !snapshot) {
+      return;
+    }
+    // 用户在底部附近时继续贴底；在中间阅读时保持距底部距离，避免内容换行后视口突然跳走。
+    ele.scrollTop = snapshot.wasNearBottom
+      ? ele.scrollHeight
+      : Math.max(0, ele.scrollHeight - ele.clientHeight - snapshot.distanceToBottom);
+    messageScrollSnapshotRef.current = undefined;
+  }, []);
+
+  /**
+   * 左右侧栏宽度动画结束后，再恢复消息区位置并触发图表 resize。
+   *
+   * @returns 无返回值。
+   * @throws 不主动抛出异常。
+   */
+  const onSideLayoutTransitionEnd = useCallback(() => {
+    if (typeof window === 'undefined') {
+      restoreMessageScrollSnapshot();
+      setLayoutResizeSignal(value => value + 1);
+      return;
+    }
+    if (layoutTransitionEndTimerRef.current !== undefined) {
+      window.clearTimeout(layoutTransitionEndTimerRef.current);
+    }
+    layoutTransitionEndTimerRef.current = window.setTimeout(() => {
+      restoreMessageScrollSnapshot();
+      setLayoutResizeSignal(value => value + 1);
+      layoutTransitionEndTimerRef.current = undefined;
+    }, 0);
+  }, [restoreMessageScrollSnapshot]);
+
   const onToggleHistoryVisible = () => {
+    captureMessageScrollSnapshot();
     setHistoryVisible(!historyVisible);
   };
 
@@ -374,23 +461,27 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   };
 
   const onCloseConversation = () => {
+    if (historyVisible) {
+      captureMessageScrollSnapshot();
+    }
     setHistoryVisible(false);
   };
 
   const chatClass = classNames(styles.chat, {
     [styles.mobile]: isMobile,
-    [styles.historyVisible]: historyVisible,
   });
 
   return (
     <ConfigProvider locale={locale}>
       <div className={chatClass}>
         <div className={styles.chatSection}>
-          {!isMobile && agentList.length > 1 && agentListVisible && (
+          {!isMobile && agentList.length > 1 && (
             <AgentList
               agentList={agentList}
               currentAgent={currentAgent}
+              visible={agentListVisible}
               onSelectAgent={onSelectAgent}
+              onLayoutTransitionEnd={onSideLayoutTransitionEnd}
             />
           )}
           <div className={styles.chatApp}>
@@ -429,7 +520,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                     isDebugMode={isDebugMode}
                     messageList={messageList}
                     chatId={currentConversation?.chatId}
-                    historyVisible={historyVisible}
+                    layoutResizeSignal={layoutResizeSignal}
                     currentAgent={currentAgent}
                     chatVisible={chatVisible}
                     isDeveloper={isDeveloper}
@@ -452,6 +543,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                         if (isMobile) {
                           setMobileAgentsVisible(true);
                         } else {
+                          captureMessageScrollSnapshot();
                           setAgentListVisible(!agentListVisible);
                         }
                       }}
@@ -469,6 +561,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
             currentAgent={currentAgent}
             currentConversation={currentConversation}
             historyVisible={historyVisible}
+            onLayoutTransitionEnd={onSideLayoutTransitionEnd}
             onSelectConversation={onSelectConversation}
             onCloseConversation={onCloseConversation}
             ref={conversationRef}

@@ -1,3 +1,7 @@
+/*
+ * 模块说明：聊天主界面布局样式。
+ * 职责描述：组织智能助理列表、对话内容区与占位式历史对话面板的层级关系。
+ */
 .chat {
   height: 100%;
   min-height: 0;
@@ -6,6 +10,7 @@
     linear-gradient(90deg, #f3f3f7 0%, #f3f3f7 20%, #ebf0f9 60%, #f3f3f7 80%, #f3f3f7 100%);
 
   .chatSection {
+    position: relative;
     display: flex;
     width: 100%;
     height: 100%;
@@ -14,10 +19,11 @@
 
     .chatApp {
       display: flex;
-      flex: 1;
+      flex: 1 1 0;
       flex-direction: column;
       height: 100%;
       min-height: 0;
+      min-width: 0;
       color: rgba(0, 0, 0, 0.87);
 
       .chatBody {
@@ -61,14 +67,6 @@
             }
           }
         }
-      }
-    }
-  }
-
-  &.historyVisible {
-    .chatSection {
-      .chatApp {
-        width: calc(100% - 707px);
       }
     }
   }

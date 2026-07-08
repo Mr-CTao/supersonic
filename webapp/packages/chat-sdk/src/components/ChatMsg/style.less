@@ -1,13 +1,17 @@
+// 问答结果内容容器样式：负责图表、指标和普通结果块在聊天卡片内的自适应宽度。
 @import '../../styles/index.less';
 
 @chat-msg-prefix-cls: ~'@{supersonic-chat-prefix}-chat-msg';
 
 .@{chat-msg-prefix-cls} {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 6px 14px 8px;
   border: 1px solid var(--border-color-base);
   border-radius: 4px;
   background: #f5f8fb;
-  max-width: calc(100vw - 410px);
 
   &-bottom-tools {
     display: flex;

@@ -199,7 +199,8 @@ const ChatMsg: React.FC<Props> = ({
       };
     }
     if (type === MsgContentTypeEnum.METRIC_TREND || type === MsgContentTypeEnum.METRIC_PIE) {
-      return { width: 'calc(100vw - 410px)' };
+      // 历史对话抽屉会改变聊天区域的可用宽度，图表必须跟随父容器而不是视口宽度计算。
+      return { width: '100%', minWidth: 0, maxWidth: '100%' };
     }
   };
 

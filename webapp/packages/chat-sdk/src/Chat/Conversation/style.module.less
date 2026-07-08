@@ -2,9 +2,9 @@
  * 历史对话侧栏样式模块。
  *
  * 职责：
- * - 控制问答页右侧历史对话面板的展开、收起和列表布局；
+ * - 控制问答页右侧历史对话面板的占位式展开、收起和列表布局；
  * - 在收起态保留组件实例，避免影响父组件通过 ref 刷新会话数据；
- * - 通过宽度归零和内容裁剪保证隐藏态不会在页面右侧残留可见区域。
+ * - 通过外层平滑占位、内层 transform 滑入，保留聊天区让位体验并减少动画中的内容重排。
  */
 @historyConversationWidth: 400px;
 
@@ -15,19 +15,32 @@
   width: 0;
   min-width: 0;
   height: 100%;
-  background: #f9f9f9;
-  padding: 0;
   overflow: hidden;
   visibility: hidden;
   pointer-events: none;
+  z-index: 99;
   transition:
     width 0.2s ease,
     flex-basis 0.2s ease,
-    padding 0.2s ease;
+    visibility 0.2s ease;
 
   .rightSection {
+    position: absolute;
+    top: 0;
+    right: 0;
+    box-sizing: border-box;
     width: 100%;
+    min-width: @historyConversationWidth;
     height: 100%;
+    padding: 10px 16px;
+    background: #f9f9f9;
+    border-left: 1px solid #f1f1f1;
+    opacity: 0;
+    transform: translateX(100%);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08);
+    transition:
+      transform 0.2s ease,
+      opacity 0.2s ease;
 
     .titleBar {
       display: flex;
@@ -184,14 +197,16 @@
   }
 
   &.historyVisible {
-    // 收起态仍挂载组件供父级 ref 调用；展开时再恢复固定宽度，避免右侧漏出半截面板。
+    // 外层只负责平滑占位，图表 resize 交给 transitionend 后的稳定态信号，避免动画中途重排。
     flex-basis: @historyConversationWidth;
     width: @historyConversationWidth;
     min-width: @historyConversationWidth;
-    padding: 10px 16px;
-    border-left: 1px solid #f1f1f1;
-    z-index: 99;
     visibility: visible;
     pointer-events: auto;
+
+    .rightSection {
+      transform: translateX(0);
+      opacity: 1;
+    }
   }
 }

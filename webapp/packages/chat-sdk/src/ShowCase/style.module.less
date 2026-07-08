@@ -1,3 +1,7 @@
+/*
+ * 模块说明：showcase 案例弹窗布局样式。
+ * 职责描述：为历史问答案例提供响应式网格，避免少量案例时固定双列造成右侧大面积空白和图表裁切。
+ */
 .showCase {
   position: relative;
   height: 100%;
@@ -6,8 +10,10 @@
   padding-bottom: 2px;
 
   .showCaseContent {
-    column-count: 2;
-    column-gap: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(680px, 1fr));
+    gap: 20px;
+    align-items: start;
 
     .showcaseLoading {
       display: flex;
@@ -22,7 +28,7 @@
       flex-direction: column;
       row-gap: 12px;
       padding: 12px;
-      margin-bottom: 20px;
+      min-width: 0;
       overflow-y: auto;
       border-radius: 12px;
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
@@ -33,6 +39,7 @@
         display: flex;
         flex-direction: column;
         row-gap: 12px;
+        min-width: 0;
       }
     }
   }
@@ -40,7 +47,17 @@
   &.mobile {
     padding: 0 4px;
     .showCaseContent {
-      column-count: 1;
+      grid-template-columns: 1fr;
+    }
+  }
+}
+
+@media (max-width: 760px) {
+  .showCase {
+    padding: 0 4px;
+
+    .showCaseContent {
+      grid-template-columns: 1fr;
     }
   }
 }

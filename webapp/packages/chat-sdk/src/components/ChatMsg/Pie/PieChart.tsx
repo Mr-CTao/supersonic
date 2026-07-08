@@ -8,9 +8,13 @@ import { MsgDataType } from '../../../common/type';
 import { formatByDataFormatType, getFormattedValue } from '../../../utils/utils';
 import type { ECharts } from 'echarts';
 import * as echarts from 'echarts';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { ColumnType } from '../../../common/type';
 import { normalizeChartCategoryName, toFiniteChartNumber } from '../chartData';
+
+const PIE_CHART_NARROW_WIDTH = 760;
+const PIE_CHART_DEFAULT_CENTER = ['57%', '56%'];
+const PIE_CHART_NARROW_CENTER = ['62%', '56%'];
 
 type Props = {
   data: MsgDataType;
@@ -37,13 +41,47 @@ const PieChart: React.FC<Props> = ({
 }) => {
   const chartRef = useRef<any>();
   const instanceRef = useRef<ECharts>();
+  const renderFrameRef = useRef<number>();
 
   const { queryResults } = data;
   const categoryColumnName = categoryField?.bizName || '';
   const metricColumnName = metricField?.bizName || '';
 
+  /**
+   * 根据当前容器宽度计算饼图中心点。
+   *
+   * @param chartWidth 当前图表 DOM 容器宽度。
+   * @returns ECharts pie series center 配置。
+   * @throws 不主动抛出异常。
+   */
+  const getPieCenter = (chartWidth: number) => {
+    return chartWidth < PIE_CHART_NARROW_WIDTH ? PIE_CHART_NARROW_CENTER : PIE_CHART_DEFAULT_CENTER;
+  };
+
+  /**
+   * 按 DOM 当前尺寸显式 resize ECharts 实例。
+   *
+   * @param instanceObj ECharts 实例。
+   * @returns 无返回值。
+   * @throws 不主动抛出异常；容器不存在时跳过。
+   */
+  const resizeChart = (instanceObj: ECharts) => {
+    const chartElement = chartRef.current;
+    if (!chartElement) {
+      return;
+    }
+    // 历史侧栏切换后浏览器已经知道真实容器尺寸，显式传入宽高可避免 ECharts 继续沿用旧 canvas。
+    instanceObj.resize({
+      width: chartElement.clientWidth,
+      height: chartElement.clientHeight,
+    });
+  };
+
   // 将查询结果规整成 ECharts 饼图数据，防止空分类或非法数值进入 legend / series。
-  const renderChart = () => {
+  const renderChart = useCallback(() => {
+    if (!chartRef.current) {
+      return;
+    }
     let instanceObj: any;
     if (!instanceRef.current) {
       instanceObj = echarts.init(chartRef.current);
@@ -51,6 +89,7 @@ const PieChart: React.FC<Props> = ({
     } else {
       instanceObj = instanceRef.current;
     }
+    const chartWidth = chartRef.current.clientWidth;
 
     const data = queryResults || [];
     const seriesData = data.reduce<any[]>((result, item, index) => {
@@ -96,6 +135,7 @@ const PieChart: React.FC<Props> = ({
         {
           name: '占比',
           type: 'pie',
+          center: getPieCenter(chartWidth),
           radius: ['40%', '70%'],
           avoidLabelOverlap: false,
           itemStyle: {
@@ -121,20 +161,66 @@ const PieChart: React.FC<Props> = ({
         },
       ],
     });
-    instanceObj.resize();
-  };
+    resizeChart(instanceObj);
+  }, [categoryColumnName, metricColumnName, metricField, queryResults]);
+
+  /**
+   * 延迟到下一帧重绘饼图。
+   *
+   * @returns 无返回值。
+   * @throws 不主动抛出异常；非浏览器环境直接同步渲染。
+   */
+  const scheduleRenderChart = useCallback(() => {
+    if (typeof window === 'undefined') {
+      renderChart();
+      return;
+    }
+    if (renderFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(renderFrameRef.current);
+    }
+    renderFrameRef.current = window.requestAnimationFrame(() => {
+      renderChart();
+      renderFrameRef.current = undefined;
+    });
+  }, [renderChart]);
 
   useEffect(() => {
     if (queryResults && queryResults.length > 0) {
-      renderChart();
+      scheduleRenderChart();
     }
-  }, [queryResults, metricField, categoryField]);
+  }, [queryResults, metricField, categoryField, scheduleRenderChart]);
 
   useEffect(() => {
     if (triggerResize && instanceRef.current) {
-      instanceRef.current.resize();
+      scheduleRenderChart();
     }
-  }, [triggerResize]);
+  }, [triggerResize, scheduleRenderChart]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const chartElement = chartRef.current;
+    if (!chartElement) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      scheduleRenderChart();
+    });
+    observer.observe(chartElement);
+    return () => {
+      observer.disconnect();
+    };
+  }, [scheduleRenderChart]);
+
+  useEffect(() => {
+    return () => {
+      if (renderFrameRef.current !== undefined && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(renderFrameRef.current);
+      }
+      instanceRef.current?.dispose();
+    };
+  }, []);
 
   return <div className={`${PREFIX_CLS}-pie-chart`} ref={chartRef} />;
 };

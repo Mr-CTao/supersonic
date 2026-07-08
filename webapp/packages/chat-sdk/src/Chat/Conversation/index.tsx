@@ -1,3 +1,7 @@
+/**
+ * 模块说明：历史对话侧栏组件。
+ * 职责描述：加载、搜索、切换、重命名和删除历史会话，并在侧栏布局动画结束后通知父级做稳定态重排。
+ */
 import { Dropdown, Input } from 'antd';
 import classNames from 'classnames';
 import {
@@ -20,6 +24,7 @@ type Props = {
   currentAgent?: AgentType;
   currentConversation?: ConversationDetailType;
   historyVisible?: boolean;
+  onLayoutTransitionEnd?: () => void;
   onSelectConversation: (
     conversation: ConversationDetailType,
     sendMsgParams?: any,
@@ -29,7 +34,14 @@ type Props = {
 };
 
 const Conversation: ForwardRefRenderFunction<any, Props> = (
-  { currentAgent, currentConversation, historyVisible, onSelectConversation, onCloseConversation },
+  {
+    currentAgent,
+    currentConversation,
+    historyVisible,
+    onLayoutTransitionEnd,
+    onSelectConversation,
+    onCloseConversation,
+  },
   ref
 ) => {
   const [conversations, setConversations] = useState<ConversationDetailType[]>([]);
@@ -118,8 +130,25 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
     setSearchValue(e.target.value);
   };
 
+  /**
+   * 历史面板宽度动画结束后通知父级做一次稳定态 resize。
+   *
+   * @param e CSS transition 结束事件，只处理外层占位槽的宽度类属性。
+   * @returns 无返回值。
+   * @throws 不主动抛出异常。
+   */
+  const onConversationTransitionEnd = (e: React.TransitionEvent<HTMLDivElement>) => {
+    if (
+      e.target !== e.currentTarget ||
+      (e.propertyName !== 'width' && e.propertyName !== 'flex-basis')
+    ) {
+      return;
+    }
+    onLayoutTransitionEnd?.();
+  };
+
   return (
-    <div className={conversationClass}>
+    <div className={conversationClass} onTransitionEnd={onConversationTransitionEnd}>
       <div className={styles.rightSection}>
         <div className={styles.titleBar}>
           <div className={styles.title}>历史对话</div>
