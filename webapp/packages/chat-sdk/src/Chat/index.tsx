@@ -571,10 +571,10 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
               <Drawer
                 title="showcase"
                 placement="bottom"
-                height="95%"
+                size="95%"
                 open={showCaseVisible}
                 className={styles.showCaseDrawer}
-                destroyOnClose
+                destroyOnHidden
                 onClose={() => {
                   setShowCaseVisible(false);
                 }}
@@ -589,7 +589,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                 centered
                 footer={null}
                 wrapClassName={styles.showCaseModal}
-                destroyOnClose
+                destroyOnHidden
                 onCancel={() => {
                   setShowCaseVisible(false);
                 }}

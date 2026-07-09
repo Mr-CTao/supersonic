@@ -280,7 +280,7 @@ const ModelFieldForm: React.FC<Props> = ({
             type === EnumDataSourceType.PARTITION_TIME ? PARTITION_TIME_FORMATTER : DATE_FORMATTER;
 
           return (
-            <Space direction="vertical">
+            <Space orientation="vertical">
               <Space>
                 <span>时间格式:</span>
                 <Select

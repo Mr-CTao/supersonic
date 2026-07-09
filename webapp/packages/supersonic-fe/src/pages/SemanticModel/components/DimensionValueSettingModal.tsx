@@ -315,7 +315,7 @@ const DimensionValueSettingModal: React.FC<CreateFormProps> = ({
   return (
     <Modal
       width={1200}
-      destroyOnClose
+      destroyOnHidden
       title={`维度值设置[${dimensionItem?.name}]`}
       style={{ top: 48 }}
       maskClosable={false}

@@ -97,7 +97,7 @@ const ModelCreateFormModal: React.FC<ModelCreateFormModalProps> = (props) => {
     <Modal
       width={640}
       // styles={{ padding: '32px 40px 48px' }}
-      destroyOnClose
+      destroyOnHidden
       title={'模型信息'}
       open={true}
       footer={footer}

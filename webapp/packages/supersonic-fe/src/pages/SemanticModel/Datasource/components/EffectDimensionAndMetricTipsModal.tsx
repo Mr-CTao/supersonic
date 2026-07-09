@@ -108,7 +108,7 @@ const EffectDimensionAndMetricTipsModal: React.FC<Props> = ({
         },
       }}
       width={800}
-      destroyOnClose
+      destroyOnHidden
       title={`受影响的维度&指标`}
       maskClosable={false}
       open={open}

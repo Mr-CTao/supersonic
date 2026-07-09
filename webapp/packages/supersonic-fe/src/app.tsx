@@ -15,7 +15,7 @@ import defaultSettings from '../config/defaultSettings';
 import settings from '../config/themeSettings';
 import { queryCurrentUser } from './services/user';
 import { deleteUrlQuery, isMobile, getToken } from '@/utils/utils';
-import { publicPath } from '../config/defaultSettings';
+import { publicPath, basePath } from '../config/defaultSettings';
 import type { DefaultSetting } from '../config/defaultSettings';
 import { Copilot } from 'supersonic-chat-sdk';
 import { configProviderTheme } from '../config/themeSettings';
@@ -27,6 +27,85 @@ import AppPage from './pages/index';
 
 const replaceRoute = '/';
 const CHAT_HEADER_OFFSET = 56;
+
+type LayoutMenuItem = {
+  path?: string;
+  target?: string;
+  isUrl?: boolean;
+  children?: unknown;
+};
+
+/**
+ * 判断菜单点击是否应交给浏览器原生处理。
+ *
+ * @param event 菜单锚点点击事件。
+ * @param target 菜单项声明的打开目标。
+ * @returns `true` 表示保留新标签、下载或外链等浏览器默认行为。
+ */
+const shouldUseNativeMenuNavigation = (
+  event: React.MouseEvent<HTMLAnchorElement>,
+  target?: string,
+) => {
+  return (
+    event.button !== 0 ||
+    event.metaKey ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    (target !== undefined && target !== '_self')
+  );
+};
+
+/**
+ * 将 Umi route path 转成浏览器可见 href。
+ *
+ * @param path Umi 菜单路由路径。
+ * @returns 带 `basePath` 的浏览器 href，便于复制链接和新标签打开。
+ */
+const getMenuHref = (path: string) => {
+  const routePath = path.replace(/\/\*$/, '');
+  const normalizedPath = routePath.startsWith('/') ? routePath : `/${routePath}`;
+  const normalizedBase = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
+
+  if (normalizedPath === normalizedBase || normalizedPath.startsWith(`${normalizedBase}/`)) {
+    return normalizedPath;
+  }
+
+  return `${normalizedBase}${normalizedPath}`;
+};
+
+/**
+ * 渲染可接收 ref 的菜单链接。
+ *
+ * @param menuItemProps ProLayout 传入的菜单元信息。
+ * @param defaultDom ProLayout 默认生成的菜单内容。
+ * @returns 原生锚点或默认菜单节点。
+ */
+const renderLayoutMenuItem = (menuItemProps: LayoutMenuItem, defaultDom: React.ReactNode) => {
+  if (menuItemProps.isUrl || menuItemProps.children || !menuItemProps.path) {
+    return defaultDom;
+  }
+
+  const routePath = menuItemProps.path.replace(/\/\*$/, '');
+
+  return (
+    <a
+      href={getMenuHref(routePath)}
+      target={menuItemProps.target}
+      onClick={(event) => {
+        // Ant Design 6 的菜单 Tooltip 会向子节点注入 ref；原生 a 标签可接收 ref，避免 Umi LinkWithPrefetch 触发 React warning。
+        if (shouldUseNativeMenuNavigation(event, menuItemProps.target)) {
+          return;
+        }
+
+        event.preventDefault();
+        history.push(routePath);
+      }}
+    >
+      {defaultDom}
+    </a>
+  );
+};
 
 /**
  * 判断当前路由是否为需要占满视口的聊天页。
@@ -177,6 +256,7 @@ export const layout: RunTimeLayoutConfig = (params) => {
     logo: <BrandLogo size="header" />,
     contentStyle: { ...(initialState?.contentStyle || {}) },
     rightContentRender: () => <RightContent />,
+    menuItemRender: renderLayoutMenuItem,
     disableContentMargin: true,
     // menuHeaderRender: undefined,
     childrenRender: (dom) => {

@@ -1,7 +1,7 @@
 import { useEffect, forwardRef } from 'react';
 import type { ForwardRefRenderFunction } from 'react';
 import FormItemTitle from '@/components/FormHelper/FormItemTitle';
-import { Form, Input, Select, InputNumber } from 'antd';
+import { Form, Select, InputNumber, Space } from 'antd';
 import { ISemantic } from '../../data';
 import { ChatConfigType, DetailTypeDefaultConfig, TimeModeEnum, DatePeriod } from '../../enum';
 // import TransTypeTag from '../../components/TransTypeTag';
@@ -148,7 +148,7 @@ const DefaultSettingForm: ForwardRefRenderFunction<any, Props> = (
           />
         }
       >
-        <Input.Group compact>
+        <Space.Compact>
           {chatConfigType === ChatConfigType.TAG ? (
             <span
               style={{
@@ -249,7 +249,7 @@ const DefaultSettingForm: ForwardRefRenderFunction<any, Props> = (
               <Option value={DatePeriod.YEAR}>年</Option>
             </Select>
           </FormItem>
-        </Input.Group>
+        </Space.Compact>
       </FormItem>
       <FormItem
         name={['queryConfig', DetailTypeDefaultConfig[chatConfigType], 'limit']}

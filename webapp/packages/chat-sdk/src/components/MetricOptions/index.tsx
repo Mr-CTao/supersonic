@@ -1,3 +1,8 @@
+/**
+ * 聊天推荐指标选项模块。
+ *
+ * 负责在聊天答案下方展示可切换的相关指标，并处理当前指标高亮、取消选择等交互。
+ */
 import { CLS_PREFIX } from '../../common/constants';
 import { FieldType } from '../../common/type';
 import classNames from 'classnames';
@@ -11,6 +16,12 @@ type Props = {
   onSelectMetric: (metric?: FieldType) => void;
 };
 
+/**
+ * 渲染聊天答案中的推荐指标选项。
+ *
+ * @param props 推荐指标列表、当前指标、默认指标和选择回调。
+ * @returns 推荐指标切换区域；没有可推荐指标时返回 null。
+ */
 const MetricOptions: React.FC<Props> = ({
   metrics,
   defaultMetric,
@@ -43,7 +54,7 @@ const MetricOptions: React.FC<Props> = ({
               [`${prefixCls}-content-item-active`]: currentMetric?.id === metric.id,
             });
             return (
-              <div>
+              <div key={metric.id ?? metric.bizName ?? metric.name ?? index}>
                 <span
                   className={itemNameClass}
                   onClick={() => {

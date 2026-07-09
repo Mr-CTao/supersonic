@@ -131,7 +131,7 @@ const MetricTrendDimensionFilter: React.FC<Props> = ({
           <FormItem name="operator" noStyle>
             <Select
               style={{ minWidth: 72 }}
-              bordered={false}
+              variant="borderless"
               options={Object.values(OperatorEnum).map((operator: string) => {
                 return {
                   value: operator,

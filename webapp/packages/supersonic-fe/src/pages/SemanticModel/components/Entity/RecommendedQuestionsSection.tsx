@@ -72,7 +72,7 @@ const RecommendedQuestionsSection: React.FC<Props> = ({}) => {
 
   return (
     <div style={{ width: 800, margin: '20px auto' }}>
-      <ProCard bordered title="问题推荐列表">
+      <ProCard variant="outlined" title="问题推荐列表">
         <TextAreaCommonEditList
           value={questionData}
           onChange={(list) => {

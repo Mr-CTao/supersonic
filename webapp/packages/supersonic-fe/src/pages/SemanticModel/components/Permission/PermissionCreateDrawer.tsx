@@ -128,7 +128,7 @@ const PermissionCreateDrawer: React.FC<Props> = ({
       <Drawer
         width={'100%'}
         className={styles.permissionDrawer}
-        destroyOnClose
+        destroyOnHidden
         title={'权限组信息'}
         maskClosable={false}
         open={visible}
@@ -136,12 +136,12 @@ const PermissionCreateDrawer: React.FC<Props> = ({
         onClose={onCancel}
       >
         <div style={{ overflow: 'auto', margin: '0 auto', width: '1200px' }}>
-          <Space direction="vertical" style={{ width: '100%' }} size={20}>
-            <ProCard title="基本信息" bordered>
+          <Space orientation="vertical" style={{ width: '100%' }} size={20}>
+            <ProCard title="基本信息" variant="outlined">
               <PermissionCreateForm ref={basicInfoFormRef} permissonData={permissonData} />
             </ProCard>
 
-            <ProCard title="列权限" bordered tooltip="仅对敏感度为高的指标/维度进行授权">
+            <ProCard title="列权限" variant="outlined" tooltip="仅对敏感度为高的指标/维度进行授权">
               <DimensionMetricVisibleTransfer
                 titles={['未授权维度/指标', '已授权维度/指标']}
                 listStyle={{
@@ -203,7 +203,7 @@ const PermissionCreateDrawer: React.FC<Props> = ({
               />
             </ProCard>
 
-            <ProCard bordered title="行权限">
+            <ProCard variant="outlined" title="行权限">
               <div>
                 <Form form={form} layout="vertical">
                   <FormItem name="dimensionFilters" label="表达式">

@@ -31,8 +31,6 @@ export type CreateFormProps = {
   onDataSourceBtnClick?: () => void;
   onOpenDataSourceEdit?: () => void;
 };
-const { Step } = Steps;
-
 const initFormVal = {
   name: '', // 模型名称
   bizName: '', // 模型英文名
@@ -555,7 +553,7 @@ const ModelCreateForm: React.FC<CreateFormProps> = ({
     <Modal
       forceRender
       width={currentStep ? 1400 : 800}
-      destroyOnClose
+      destroyOnHidden
       title={`${isEdit ? '编辑' : '新建'}模型`}
       maskClosable={false}
       open={createModalVisible}
@@ -564,10 +562,12 @@ const ModelCreateForm: React.FC<CreateFormProps> = ({
         onCancel?.();
       }}
     >
-      <Steps style={{ marginBottom: 28 }} size="small" current={currentStep}>
-        <Step title="基本信息" />
-        <Step title="字段信息" />
-      </Steps>
+      <Steps
+        style={{ marginBottom: 28 }}
+        size="small"
+        current={currentStep}
+        items={[{ title: '基本信息' }, { title: '字段信息' }]}
+      />
       <Form
         {...formLayout}
         form={form}

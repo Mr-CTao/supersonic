@@ -383,7 +383,7 @@ const MDatePicker: React.FC<Props> = ({
     </>
   );
   return (
-    <Space direction="vertical">
+    <Space orientation="vertical">
       <Popover
         content={content}
         destroyTooltipOnHide={false}

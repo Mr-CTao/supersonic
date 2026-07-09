@@ -120,7 +120,7 @@ const XflowJsonSchemaFormDrawerForm: React.FC<CreateFormProps> = (props) => {
       )}
       <Drawer
         width={'100%'}
-        destroyOnClose
+        destroyOnHidden
         title="数据源编辑"
         open={createModalVisible}
         onClose={() => {

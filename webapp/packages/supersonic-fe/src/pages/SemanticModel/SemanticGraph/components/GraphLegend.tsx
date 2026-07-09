@@ -1,12 +1,12 @@
 import { Space, Checkbox } from 'antd';
-import type { CheckboxValueType } from 'antd/es/checkbox/Group';
+import type { CheckboxOptionType } from 'antd';
 import React, { useState, useEffect } from 'react';
 import styles from '../style.less';
 
 type Props = {
   legendOptions: LegendOptionsItem[];
   value?: string[];
-  onChange?: (ids: CheckboxValueType[]) => void;
+  onChange?: (ids: CheckboxOptionType['value'][]) => void;
   defaultCheckAll?: boolean;
   [key: string]: any;
 };
@@ -22,7 +22,7 @@ const GraphLegend: React.FC<Props> = ({
   defaultCheckAll = false,
   onChange,
 }) => {
-  const [groupValue, setGroupValue] = useState<CheckboxValueType[]>(value || []);
+  const [groupValue, setGroupValue] = useState<CheckboxOptionType['value'][]>(value || []);
 
   useEffect(() => {
     if (!defaultCheckAll) {
@@ -47,7 +47,7 @@ const GraphLegend: React.FC<Props> = ({
     setGroupValue(value);
   }, [value]);
 
-  const handleChange = (checkedValues: CheckboxValueType[]) => {
+  const handleChange = (checkedValues: CheckboxOptionType['value'][]) => {
     setGroupValue(checkedValues);
     onChange?.(checkedValues);
   };

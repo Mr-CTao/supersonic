@@ -531,7 +531,7 @@ const CapabilityTab: React.FC<CapabilityTabProps> = ({ llmList, capabilities, on
   const [saveLoading, setSaveLoading] = useState<boolean>(false);
   const [form] = Form.useForm();
 
-  // 打开抽屉时同步当前行数据，关闭后由 destroyOnClose 清理表单 DOM。
+  // 打开抽屉时同步当前行数据，关闭后由 destroyOnHidden 清理表单 DOM。
   useEffect(() => {
     if (editing) {
       form.setFieldsValue(editing);
@@ -666,7 +666,7 @@ const CapabilityTab: React.FC<CapabilityTabProps> = ({ llmList, capabilities, on
         width={560}
         title="编辑模型能力"
         open={!!editing}
-        destroyOnClose
+        destroyOnHidden
         onClose={() => setEditing(undefined)}
         extra={
           <Button type="primary" loading={saveLoading} onClick={handleSave}>
@@ -1166,7 +1166,7 @@ const InvocationLogTab: React.FC<InvocationLogTabProps> = ({ llmList }) => {
         width={720}
         title="调用日志详情"
         open={detailOpen}
-        destroyOnClose
+        destroyOnHidden
         onClose={() => setDetailOpen(false)}
       >
         <Descriptions size="small" bordered column={2}>

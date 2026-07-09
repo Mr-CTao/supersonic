@@ -1,3 +1,8 @@
+/**
+ * 聊天筛选项模块。
+ *
+ * 负责渲染聊天结果追问/筛选条件中的数值、日期、多选维值和实体切换控件，并把用户修改同步回筛选列表。
+ */
 import { Select, Spin, InputNumber, DatePicker } from 'antd';
 import { PREFIX_CLS } from '../../common/constants';
 import { ChatContextType, FilterItemType } from '../../common/type';
@@ -21,6 +26,29 @@ type Props = {
   onSwitchEntity: (entityId: string) => void;
 };
 
+/**
+ * 将业务筛选值转换为 antd multiple Select 需要的数组值。
+ *
+ * @param value 当前筛选值，业务层可能用字符串表达单值、用数组表达多值。
+ * @returns 可安全传给 `mode="multiple"` 的字符串数组。
+ * @throws 不主动抛出异常；空值会被规整为空数组。
+ */
+const normalizeMultipleFilterValue = (value: unknown) => {
+  if (isArray(value)) {
+    return value.filter(item => item !== undefined && item !== null).map(String);
+  }
+  if (value === undefined || value === null || value === '') {
+    return [];
+  }
+  return [String(value)];
+};
+
+/**
+ * 渲染单个聊天筛选条件。
+ *
+ * @param props 筛选上下文、当前筛选项、可选实体切换信息和回调。
+ * @returns 当前筛选条件对应的输入控件。
+ */
 const FilterItem: React.FC<Props> = ({
   disabled = false,
   modelId,
@@ -128,10 +156,10 @@ const FilterItem: React.FC<Props> = ({
     onFiltersChange(newFilters);
   };
 
-  const onDateChange = (_: any, date: string | string[]) => {
+  const onDateChange = (_: any, date: string | string[] | null) => {
     const newFilters = filters.map((item, indexValue) => {
       if (item.bizName === filter.bizName && index === indexValue) {
-        item.value = date;
+        item.value = date ?? '';
       }
       return item;
     });
@@ -173,7 +201,7 @@ const FilterItem: React.FC<Props> = ({
         !filter.bizName?.includes('_id') ? (
         <Select
           disabled={disabled}
-          value={filter.value}
+          value={normalizeMultipleFilterValue(filter.value)}
           options={options.filter(option => option.value !== '' && option.value !== null)}
           className={`${prefixCls}-select-control`}
           onSearch={debounceFetcher}

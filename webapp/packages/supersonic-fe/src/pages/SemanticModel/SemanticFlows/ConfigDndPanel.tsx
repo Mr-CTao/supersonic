@@ -15,7 +15,7 @@ export const onNodeDrop: NsNodeCollapsePanel.IOnNodeDrop = async (node, commands
 
 const NodeDescription = (props: { name: string }) => {
   return (
-    <Card size="small" style={{ width: '200px' }} bordered={false}>
+    <Card size="small" style={{ width: '200px' }} variant="borderless">
       将数据源组件拖入画布，对数据源进行设置及关联
     </Card>
   );

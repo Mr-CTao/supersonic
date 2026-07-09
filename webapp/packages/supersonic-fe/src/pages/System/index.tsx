@@ -242,14 +242,14 @@ const System: React.FC = () => {
 
                 <Divider />
 
-                <Space direction="vertical" style={{ width: '100%' }} size={35}>
+                <Space orientation="vertical" style={{ width: '100%' }} size={35}>
                   {Object.keys(systemConfig).map((key: string) => {
                     const itemList = systemConfig[key];
                     return (
                       <ProCard
                         title={<span style={{ color: '#296df3' }}>{key}</span>}
                         key={key}
-                        bordered
+                        variant="outlined"
                         id={key}
                       >
                         {genneratorFormItemList(itemList)}

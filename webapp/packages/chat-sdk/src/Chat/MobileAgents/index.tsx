@@ -25,7 +25,7 @@ const MobileAgents: React.FC<Props> = ({
       title="智能助理"
       placement="bottom"
       open={open}
-      height="85%"
+      size="85%"
       className={styles.mobileAgents}
       onClose={onClose}
     >

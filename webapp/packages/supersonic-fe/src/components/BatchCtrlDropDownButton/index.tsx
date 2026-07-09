@@ -152,7 +152,7 @@ const BatchCtrlDropDownButton: FC<BatchCtrlDropDownButtonProps> = ({
   const popoverConfig = {
     title: '选择下载区间',
     content: (
-      <Space direction="vertical">
+      <Space orientation="vertical">
         <Radio.Group
           size="small"
           value={pickerType}

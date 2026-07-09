@@ -239,7 +239,7 @@ const ModelRelationFormDrawer: React.FC<ModelRelationFormDrawerProps> = ({
     <Drawer
       forceRender
       width={400}
-      destroyOnClose
+      destroyOnHidden
       getContainer={false}
       title={'模型关联信息'}
       mask={false}

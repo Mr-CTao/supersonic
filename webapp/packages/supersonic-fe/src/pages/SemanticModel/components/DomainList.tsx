@@ -1,6 +1,6 @@
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { Input, message, Popconfirm, Tooltip, Row, Col, Button, Menu, MenuProps } from 'antd';
-import type { DataNode } from 'antd/lib/tree';
+import type { TreeDataNode } from 'antd';
 import { useEffect, useState } from 'react';
 import type { FC } from 'react';
 import { useModel, history } from '@umijs/max';
@@ -18,8 +18,8 @@ type DomainListProps = {
   onTreeDataUpdate?: () => void;
 };
 
-const projectTreeFlat = (projectTree: DataNode[], filterValue: string): DataNode[] => {
-  let newProjectTree: DataNode[] = [];
+const projectTreeFlat = (projectTree: TreeDataNode[], filterValue: string): TreeDataNode[] => {
+  let newProjectTree: TreeDataNode[] = [];
   projectTree.map((item) => {
     const { children, ...rest } = item;
     if (String(item.title).includes(filterValue)) {

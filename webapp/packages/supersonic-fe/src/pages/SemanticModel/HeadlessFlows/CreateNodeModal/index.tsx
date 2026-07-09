@@ -53,7 +53,7 @@ const CreateEntityModal = (props: Props) => {
   return (
     <Modal
       title="创建模型"
-      visible={visible}
+      open={visible}
       confirmLoading={confirmLoading}
       wrapClassName="create-entity-container"
       okText="确定"
@@ -62,7 +62,7 @@ const CreateEntityModal = (props: Props) => {
       onCancel={() => onCancel()}
       mask={false}
       centered
-      destroyOnClose={true}
+      destroyOnHidden={true}
     >
       <Form form={form}>
         <Form.Item

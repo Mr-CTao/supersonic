@@ -26,6 +26,7 @@ import {
   normalizeChartCategoryName,
   normalizeTrendMetricValue,
 } from '../chartData';
+import { renderChartWhenContainerReady } from '../chartContainer';
 
 type Props = {
   model?: string;
@@ -69,6 +70,9 @@ const MetricTrendChart: React.FC<Props> = ({
 
   // 将查询结果规整成 ECharts 趋势图数据，空分类统一兜底，非法数值以断点展示。
   const renderChart = () => {
+    if (!chartRef.current) {
+      return;
+    }
     let instanceObj: any;
     if (!instanceRef.current) {
       instanceObj = echarts.init(chartRef.current);
@@ -235,7 +239,7 @@ const MetricTrendChart: React.FC<Props> = ({
 
   useEffect(() => {
     if (metricField.authorized) {
-      renderChart();
+      return renderChartWhenContainerReady(() => chartRef.current, renderChart);
     }
   }, [resultList, metricField, chartType]);
 

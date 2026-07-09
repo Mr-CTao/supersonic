@@ -116,7 +116,7 @@ const CommonEditList: React.FC<Props> = ({
               </Button>
             )
           }
-          showArrow={false}
+          suffixIcon={null}
         >
           <div>
             <SqlEditor

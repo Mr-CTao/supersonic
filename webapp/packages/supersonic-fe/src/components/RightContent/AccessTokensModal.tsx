@@ -146,11 +146,10 @@ const ChangePasswordModal = forwardRef<IRef>((_, ref) => {
     <Modal
       title="访问令牌"
       open={open}
-      onClose={closeModal}
       onCancel={closeModal}
       width={1200}
       footer={false}
-      destroyOnClose
+      destroyOnHidden
     >
       <EditableProTable<DataSourceType>
         rowKey="id"

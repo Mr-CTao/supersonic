@@ -52,7 +52,7 @@ const DomaintInfoForm: React.FC<Props> = (props) => {
   return (
     <Modal
       width={640}
-      destroyOnClose
+      destroyOnHidden
       title={`${modelType === 'add' ? '新增' : '编辑'}${infoName}`}
       open={true}
       footer={footer}

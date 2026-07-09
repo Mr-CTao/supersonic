@@ -10,6 +10,7 @@ import type { ECharts } from 'echarts';
 import * as echarts from 'echarts';
 import { useCallback, useEffect, useRef } from 'react';
 import { ColumnType } from '../../../common/type';
+import { renderChartWhenContainerReady } from '../chartContainer';
 import { normalizeChartCategoryName, toFiniteChartNumber } from '../chartData';
 
 const PIE_CHART_NARROW_WIDTH = 760;
@@ -41,7 +42,6 @@ const PieChart: React.FC<Props> = ({
 }) => {
   const chartRef = useRef<any>();
   const instanceRef = useRef<ECharts>();
-  const renderFrameRef = useRef<number>();
 
   const { queryResults } = data;
   const categoryColumnName = categoryField?.bizName || '';
@@ -164,60 +164,20 @@ const PieChart: React.FC<Props> = ({
     resizeChart(instanceObj);
   }, [categoryColumnName, metricColumnName, metricField, queryResults]);
 
-  /**
-   * 延迟到下一帧重绘饼图。
-   *
-   * @returns 无返回值。
-   * @throws 不主动抛出异常；非浏览器环境直接同步渲染。
-   */
-  const scheduleRenderChart = useCallback(() => {
-    if (typeof window === 'undefined') {
-      renderChart();
-      return;
-    }
-    if (renderFrameRef.current !== undefined) {
-      window.cancelAnimationFrame(renderFrameRef.current);
-    }
-    renderFrameRef.current = window.requestAnimationFrame(() => {
-      renderChart();
-      renderFrameRef.current = undefined;
-    });
-  }, [renderChart]);
-
   useEffect(() => {
     if (queryResults && queryResults.length > 0) {
-      scheduleRenderChart();
+      return renderChartWhenContainerReady(() => chartRef.current, renderChart);
     }
-  }, [queryResults, metricField, categoryField, scheduleRenderChart]);
+  }, [queryResults, metricField, categoryField, renderChart]);
 
   useEffect(() => {
     if (triggerResize && instanceRef.current) {
-      scheduleRenderChart();
+      return renderChartWhenContainerReady(() => chartRef.current, renderChart);
     }
-  }, [triggerResize, scheduleRenderChart]);
-
-  useEffect(() => {
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
-    const chartElement = chartRef.current;
-    if (!chartElement) {
-      return;
-    }
-    const observer = new ResizeObserver(() => {
-      scheduleRenderChart();
-    });
-    observer.observe(chartElement);
-    return () => {
-      observer.disconnect();
-    };
-  }, [scheduleRenderChart]);
+  }, [triggerResize, renderChart]);
 
   useEffect(() => {
     return () => {
-      if (renderFrameRef.current !== undefined && typeof window !== 'undefined') {
-        window.cancelAnimationFrame(renderFrameRef.current);
-      }
       instanceRef.current?.dispose();
     };
   }, []);

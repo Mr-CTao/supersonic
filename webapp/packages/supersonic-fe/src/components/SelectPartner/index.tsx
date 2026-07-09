@@ -150,7 +150,7 @@ const SelectPartner: React.FC<Props> = ({
         style={{ width: '100%' }}
         value={value}
         loadData={onLoadData}
-        dropdownStyle={{ maxHeight: 800, overflow: 'auto' }}
+        styles={{ popup: { root: { maxHeight: 800, overflow: 'auto' } } }}
         allowClear
         multiple
         onChange={handleChange}

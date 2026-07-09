@@ -1,3 +1,8 @@
+/**
+ * 聊天插件管理页面模块。
+ *
+ * 负责展示、筛选、新建、编辑和删除聊天插件配置，并通过稳定行 key 保障 antd Table 在 React 18 下渲染不产生 key 警告。
+ */
 import { getLeafNodes } from '@/utils/utils';
 import { PlusOutlined } from '@ant-design/icons';
 import { Button, Input, message, Popconfirm, Select, Table, Tag } from 'antd';
@@ -225,6 +230,7 @@ const PluginManage = () => {
           </Button>
         </div>
         <Table
+          rowKey="id"
           columns={columns}
           dataSource={data}
           size="small"

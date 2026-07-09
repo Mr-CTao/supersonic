@@ -151,7 +151,7 @@ const TagObjectCreateForm: React.FC<CreateFormProps> = ({
       width={800}
       style={{ top: 48 }}
       // styles={{ padding: '32px 40px 48px' }}
-      destroyOnClose
+      destroyOnHidden
       title={`${isEdit ? '编辑' : '新建'}标签对象`}
       maskClosable={false}
       open={createModalVisible}

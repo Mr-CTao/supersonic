@@ -18,6 +18,7 @@ import {
   normalizeChartCategoryName,
   normalizeTrendMetricValue,
 } from '../chartData';
+import { renderChartWhenContainerReady } from '../chartContainer';
 
 type Props = {
   dateColumnName: string;
@@ -52,6 +53,9 @@ const MultiMetricsTrendChart: React.FC<Props> = ({
   const instanceRef = useRef<ECharts>();
   // 将多指标查询结果规整成 ECharts series，非法数值以断点展示，避免 NaN 参与绘制。
   const renderChart = () => {
+    if (!chartRef.current) {
+      return;
+    }
     let instanceObj: any;
     if (!instanceRef.current) {
       instanceObj = echarts.init(chartRef.current);
@@ -165,7 +169,7 @@ const MultiMetricsTrendChart: React.FC<Props> = ({
   register('downloadChartAsImage', downloadChartAsImage);
 
   useEffect(() => {
-    renderChart();
+    return renderChartWhenContainerReady(() => chartRef.current, renderChart);
   }, [resultList, chartType]);
 
   useEffect(() => {

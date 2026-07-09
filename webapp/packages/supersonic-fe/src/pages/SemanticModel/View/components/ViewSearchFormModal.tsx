@@ -139,7 +139,7 @@ const ViewSearchFormModal: React.FC<ModelCreateFormModalProps> = ({
   return (
     <Modal
       width={800}
-      destroyOnClose
+      destroyOnHidden
       title={'查询设置'}
       open={true}
       maskClosable={false}

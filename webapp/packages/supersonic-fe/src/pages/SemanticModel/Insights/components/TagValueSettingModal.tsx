@@ -59,7 +59,7 @@ const TagValueSettingModal: React.FC<CreateFormProps> = ({ onCancel, open, tagIt
   return (
     <Modal
       width={800}
-      destroyOnClose
+      destroyOnHidden
       title="标签值设置"
       style={{ top: 48 }}
       maskClosable={false}

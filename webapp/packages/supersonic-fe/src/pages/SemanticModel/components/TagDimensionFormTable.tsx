@@ -110,7 +110,7 @@ const TagDimensionFormTable: React.FC<Props> = ({
 
   return (
     <>
-      <Space direction="vertical" style={{ width: '100%' }}>
+      <Space orientation="vertical" style={{ width: '100%' }}>
         <ProTable
           actionRef={actionRef}
           headerTitle={<FormLabelRequire title="维度列表" />}

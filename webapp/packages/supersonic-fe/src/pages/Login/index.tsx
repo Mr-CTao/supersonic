@@ -15,7 +15,7 @@ import RegisterForm from './components/RegisterForm';
 // import ForgetPwdForm from './components/ForgetPwdForm';
 import { ROUTE_AUTH_CODES } from '../../../config/routes';
 import React, { useState } from 'react';
-import { useForm } from 'antd/lib/form/Form';
+
 import type { RegisterFormDetail } from './components/types';
 import { postUserLogin, userRegister } from './services';
 import { AUTH_TOKEN_KEY } from '@/common/constants';
@@ -28,7 +28,7 @@ const { Item } = Form;
 const LoginPage: React.FC = () => {
   const [createModalVisible, setCreateModalVisible] = useState<boolean>(false);
   const encryptKey = CryptoJS.enc.Utf8.parse('supersonic@2024');
-  const [form] = useForm();
+  const [form] = Form.useForm();
   const { initialState = {}, setInitialState } = useModel('@@initialState');
   // 通过用户信息进行登录
   const loginDone = async (values: RegisterFormDetail) => {

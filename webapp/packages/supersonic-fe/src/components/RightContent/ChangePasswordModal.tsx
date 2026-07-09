@@ -54,7 +54,6 @@ const ChangePasswordModal = forwardRef<IRef>((_, ref) => {
       title="修改密码"
       open={open}
       onOk={handleOk}
-      onClose={closeModal}
       onCancel={closeModal}
       confirmLoading={confirmLoading}
     >

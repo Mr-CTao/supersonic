@@ -58,7 +58,7 @@ const RegisterForm: React.FC<RegisterFormProps> = (props) => {
     <Modal
       width={600}
       styles={{ padding: '32px 40px 48px' }}
-      destroyOnClose
+      destroyOnHidden
       title="用户注册"
       open={createModalVisible}
       footer={renderFooter()}

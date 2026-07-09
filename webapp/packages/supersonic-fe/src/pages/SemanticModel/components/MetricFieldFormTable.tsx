@@ -109,7 +109,7 @@ const MetricFieldFormTable: React.FC<Props> = ({
 
   return (
     <>
-      <Space direction="vertical" style={{ width: '100%' }}>
+      <Space orientation="vertical" style={{ width: '100%' }}>
         <ProTable
           headerTitle={<FormLabelRequire title="字段列表" />}
           rowKey="fieldName"

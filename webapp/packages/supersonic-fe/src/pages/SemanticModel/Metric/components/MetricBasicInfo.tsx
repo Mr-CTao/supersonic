@@ -1,4 +1,10 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * 指标基础信息展示模块。
+ *
+ * 负责展示指标、模型和指标定义信息，并为定义明细表补充稳定行 key，
+ * 避免不同定义类型返回的明细对象缺少默认 `key` 字段时触发 React 列表 key 警告。
+ */
+import React, { useState, useEffect, useMemo } from 'react';
 import { Divider, Flex, Tag, Input, Table } from 'antd';
 import { METRIC_DEFINE_TYPE } from '../../constant';
 import styles from '../style.less';
@@ -9,6 +15,46 @@ type Props = {
   metircData?: ISemantic.IMetricItem;
 };
 
+const METRIC_DEFINE_TABLE_ROW_KEY = '__metricDefineTableRowKey';
+
+/**
+ * 生成指标定义明细表的数据源。
+ *
+ * @param list 原始指标定义明细列表。
+ * @returns 带内部行 key 的表格数据源。
+ * @throws 不主动抛出异常；非数组数据会规整为空数组。
+ */
+const getMetricDefineTableDataSource = (list?: any[]) => {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+
+  return list.map((item, index) => {
+    const record = typeof item === 'object' && item !== null ? item : { value: item };
+    const stableId =
+      record.id ??
+      record.key ??
+      record.bizName ??
+      record.fieldName ??
+      record.name ??
+      record[METRIC_DEFINE_TABLE_ROW_KEY];
+    const rowKey = stableId !== undefined && stableId !== null && stableId !== ''
+      ? stableId
+      : `${index}-${JSON.stringify(record)}`;
+
+    return {
+      ...record,
+      [METRIC_DEFINE_TABLE_ROW_KEY]: String(rowKey),
+    };
+  });
+};
+
+/**
+ * 渲染指标基础信息。
+ *
+ * @param props 指标详情数据。
+ * @returns 指标基础信息和定义明细区域。
+ */
 const MetricBasicInformation: React.FC<Props> = ({ metircData }) => {
   const [defineData, setDefineData] = useState<{
     name: string;
@@ -17,6 +63,10 @@ const MetricBasicInformation: React.FC<Props> = ({ metircData }) => {
     list: any[];
     columns: any[];
   }>();
+  const defineTableDataSource = useMemo(
+    () => getMetricDefineTableDataSource(defineData?.list),
+    [defineData?.list]
+  );
 
   const metricColumns = [
     {
@@ -202,9 +252,10 @@ const MetricBasicInformation: React.FC<Props> = ({ metircData }) => {
           {defineData?.listName}：
         </div>
         <Table
+          rowKey={METRIC_DEFINE_TABLE_ROW_KEY}
           className={styles.defineDataTable}
           columns={defineData?.columns}
-          dataSource={defineData?.list}
+          dataSource={defineTableDataSource}
           size="small"
           pagination={false}
         />

@@ -60,7 +60,7 @@ const MemorySettingModal: React.FC<CreateFormProps> = ({ onCancel, agentId, open
   return (
     <Modal
       width={600}
-      destroyOnClose
+      destroyOnHidden
       title="记忆设置"
       style={{ top: 48 }}
       maskClosable={false}

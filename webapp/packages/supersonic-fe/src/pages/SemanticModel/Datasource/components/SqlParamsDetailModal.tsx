@@ -5,7 +5,7 @@ import { isFunction } from 'lodash';
 import { objToArray } from '@/utils/utils';
 import type { ParamsItemProps, OprType } from '../data';
 import { IDataSource } from '../../data';
-import TextArea from 'antd/lib/input/TextArea';
+
 import ParamsSqlEditor from './SqlParamsSqlEditor';
 
 // const EnumSqlParamsType = {
@@ -20,6 +20,7 @@ const EnumSqlValueType = {
 };
 
 const { Option } = Select;
+const { TextArea } = Input;
 
 const ParamsTextArea: FC<ParamsItemProps> = ({ value, onChange }) => {
   return (

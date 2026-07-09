@@ -74,7 +74,7 @@ const BatchSensitiveLevelModal: React.FC<Props> = ({
   return (
     <Modal
       width={500}
-      destroyOnClose
+      destroyOnHidden
       title="批量敏感度设置"
       style={{ top: 48 }}
       maskClosable={false}

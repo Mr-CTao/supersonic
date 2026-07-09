@@ -72,7 +72,7 @@ const DimensionAndMetricRelationModal: React.FC<Props> = ({
     <>
       <Modal
         width={1200}
-        destroyOnClose
+        destroyOnHidden
         title={
           <FormItemTitle
             title={'维度关联'}

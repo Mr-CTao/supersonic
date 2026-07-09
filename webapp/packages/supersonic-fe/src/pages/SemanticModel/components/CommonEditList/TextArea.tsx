@@ -110,7 +110,7 @@ const CommonEditList: React.FC<Props> = ({ title, defaultCollapse = false, value
               </Button>
             )
           }
-          showArrow={false}
+          suffixIcon={null}
         >
           <div>
             <TextArea

@@ -1,4 +1,13 @@
 {
+	"pnpm": {
+		"overrides": {
+			"@umijs/plugins>@ant-design/icons": "4.8.3",
+			"antd": "6.5.0"
+		},
+		"patchedDependencies": {
+			"@umijs/plugins@4.2.5": "patches/@umijs__plugins@4.2.5.patch"
+		}
+	},
 	"dependencies": {
 		"supersonic-chat-sdk": "link:packages/chat-sdk"
 	}

@@ -1,3 +1,9 @@
+/**
+ * 助理配置表单模块。
+ *
+ * 负责编辑助理基础信息、大模型场景配置、工具配置、记忆管理和权限管理。
+ * 在动态渲染模型场景和提示说明时提供稳定 React key，避免 antd 6 升级后控制台暴露列表 key 警告。
+ */
 import { Form, Input, Button, Switch, Tabs, Select, message, Space, Tooltip } from 'antd';
 import MainTitleMark from '@/components/MainTitleMark';
 import { AgentType, ChatAppConfig } from './type';
@@ -27,6 +33,14 @@ const defaultAgentConfig = {
   debugMode: true,
 };
 
+/**
+ * 渲染助理配置表单。
+ *
+ * @param props.editAgent 当前编辑的助理；为空时表示创建态。
+ * @param props.onSaveAgent 保存助理配置的回调。
+ * @param props.onCreateToolBtnClick 创建工具按钮回调。
+ * @returns 助理配置表单节点。
+ */
 const AgentForm: React.FC<Props> = ({ editAgent, onSaveAgent, onCreateToolBtnClick }) => {
   const [saveLoading, setSaveLoading] = useState(false);
   const [examples, setExamples] = useState<{ id: string; question?: string }[]>([]);
@@ -279,6 +293,7 @@ const AgentForm: React.FC<Props> = ({ editAgent, onSaveAgent, onCreateToolBtnCli
               {modelTypeOptions.map((item) => {
                 return (
                   <div
+                    key={`chat-model-${item.value}`}
                     className={`${styles.agentChatModelCell} ${
                       currentChatModel === item.value ? styles.agentChatModelCellActive : ''
                     }`}
@@ -326,7 +341,7 @@ const AgentForm: React.FC<Props> = ({ editAgent, onSaveAgent, onCreateToolBtnCli
                               title={
                                 <>
                                   {tips.map((tip) => (
-                                    <div>{tip}</div>
+                                    <div key={tip}>{tip}</div>
                                   ))}
                                 </>
                               }

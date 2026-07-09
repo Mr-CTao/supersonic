@@ -1,5 +1,5 @@
 import { message, TreeSelect } from 'antd';
-import type { DataNode } from 'antd/lib/tree';
+import type { TreeDataNode } from 'antd';
 import { useEffect, useState, useRef } from 'react';
 import type { FC } from 'react';
 import { getDomainList } from '../../SemanticModel/service';
@@ -23,7 +23,7 @@ const DomainTreeSelect: FC<Props> = ({
   onDefaultValue,
   treeSelectProps = {},
 }) => {
-  const [domainTree, setDomainTree] = useState<DataNode[]>([]);
+  const [domainTree, setDomainTree] = useState<TreeDataNode[]>([]);
 
   const defaultValue = useRef<number>();
   const [initState, setInitState] = useState<boolean>(false);
@@ -64,12 +64,12 @@ const DomainTreeSelect: FC<Props> = ({
       {defaultValue.current ? (
         <TreeSelect
           defaultValue={defaultValue.current}
-          popupClassName={styles.domainSelector}
+          classNames={{ popup: { root: styles.domainSelector } }}
           showSearch
           key="defaultValue"
           style={{ width: '100%' }}
           value={value}
-          dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
+          styles={{ popup: { root: { maxHeight: 400, overflow: 'auto' } } }}
           placeholder={'请选择主题域'}
           allowClear
           multiple
@@ -82,12 +82,12 @@ const DomainTreeSelect: FC<Props> = ({
       ) : (
         <TreeSelect
           defaultValue={defaultValue.current}
-          popupClassName={styles.domainSelector}
+          classNames={{ popup: { root: styles.domainSelector } }}
           showSearch
           key="preRender"
           style={{ width: '100%' }}
           value={value}
-          dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
+          styles={{ popup: { root: { maxHeight: 400, overflow: 'auto' } } }}
           placeholder={'请选择主题域'}
           allowClear
           multiple

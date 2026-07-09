@@ -36,6 +36,30 @@ export type RemoteSelectImperativeHandle = {
 
 const { Option } = Select;
 
+/**
+ * 将多选 Select 的受控值归一化为数组。
+ *
+ * @param value 外部表单或接口传入的原始值，历史数据可能是逗号分隔字符串。
+ * @returns antd `mode="multiple"` 期望的数组值。
+ * @throws 不主动抛出异常；无法识别的空值统一回退为空数组，避免 antd 6 开发态 warning。
+ */
+const normalizeMultipleSelectValue = (value: any) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  return [value];
+};
+
 const DebounceSelect = forwardRef(
   (
     {
@@ -55,6 +79,7 @@ const DebounceSelect = forwardRef(
     if (isFunction(formatPropsValue)) {
       props.value = formatPropsValue(props.value);
     }
+    props.value = normalizeMultipleSelectValue(props.value);
     const [fetching, setFetching] = useState(false);
     const [options, setOptions] = useState(props.options || props.source || []);
 

@@ -60,7 +60,7 @@ const Pie: React.FC<Props> = ({
       <div className={`${prefixCls}-select-options`}>
         <Select
           defaultValue="pie"
-          bordered={false}
+          variant="borderless"
           options={metricChartSelectOptions}
           onChange={(value: string) => setChartType(value)}
         />

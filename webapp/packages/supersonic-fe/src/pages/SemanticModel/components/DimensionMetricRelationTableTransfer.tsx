@@ -1,7 +1,6 @@
 import { Table, Transfer, Checkbox, message, Tooltip } from 'antd';
-import type { ColumnsType, TableRowSelection } from 'antd/es/table/interface';
-import type { TransferItem } from 'antd/es/transfer';
-import type { CheckboxChangeEvent } from 'antd/es/checkbox';
+import type { TableColumnsType, TableProps } from 'antd';
+import type { CheckboxChangeEvent } from 'antd';
 import difference from 'lodash/difference';
 import React, { useState, useEffect } from 'react';
 import TransTypeTag from './TransTypeTag';
@@ -129,7 +128,7 @@ const DimensionMetricRelationTableTransfer: React.FC<Props> = ({
     onChange?.(relations);
   };
 
-  const rightColumns: ColumnsType<RecordType> = [
+  const rightColumns: TableColumnsType<RecordType> = [
     {
       dataIndex: 'name',
       title: '名称',
@@ -170,7 +169,7 @@ const DimensionMetricRelationTableTransfer: React.FC<Props> = ({
     },
   ];
 
-  const leftColumns: ColumnsType<RecordType> = [
+  const leftColumns: TableColumnsType<RecordType> = [
     {
       dataIndex: 'name',
       title: '名称',
@@ -216,7 +215,7 @@ const DimensionMetricRelationTableTransfer: React.FC<Props> = ({
           disabled: listDisabled,
         }) => {
           const columns: any = direction === 'left' ? leftColumns : rightColumns;
-          const rowSelection: TableRowSelection<TransferItem> = {
+          const rowSelection: NonNullable<TableProps<RecordType>['rowSelection']> = {
             getCheckboxProps: (item) => ({ disabled: listDisabled || item.disabled }),
             onSelectAll(selected, selectedRows) {
               const treeSelectedKeys = selectedRows

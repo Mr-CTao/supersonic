@@ -348,7 +348,7 @@ const DimensionInfoModal: React.FC<CreateFormProps> = ({
     <>
       <Modal
         width={800}
-        destroyOnClose
+        destroyOnHidden
         title="维度信息"
         style={{ top: 48 }}
         maskClosable={false}

@@ -1,6 +1,5 @@
 import { Table, Transfer } from 'antd';
-import type { ColumnsType, TableRowSelection } from 'antd/es/table/interface';
-import type { TransferItem } from 'antd/es/transfer';
+import type { TableColumnsType, TableProps } from 'antd';
 import difference from 'lodash/difference';
 import React from 'react';
 import type { IChatConfig } from '../../data';
@@ -23,7 +22,7 @@ const DimensionMetricVisibleTableTransfer: React.FC<Props> = ({
   knowledgeInfosMap,
   ...restProps
 }) => {
-  let rightColumns: ColumnsType<RecordType> = [
+  let rightColumns: TableColumnsType<RecordType> = [
     {
       dataIndex: 'name',
       title: '名称',
@@ -38,7 +37,7 @@ const DimensionMetricVisibleTableTransfer: React.FC<Props> = ({
     },
   ];
 
-  const leftColumns: ColumnsType<RecordType> = [
+  const leftColumns: TableColumnsType<RecordType> = [
     {
       dataIndex: 'name',
       title: '名称',
@@ -80,7 +79,7 @@ const DimensionMetricVisibleTableTransfer: React.FC<Props> = ({
           selectedKeys: listSelectedKeys,
         }) => {
           const columns: any = direction === 'left' ? leftColumns : rightColumns;
-          const rowSelection: TableRowSelection<TransferItem> = {
+          const rowSelection: NonNullable<TableProps<RecordType>['rowSelection']> = {
             onSelectAll(selected, selectedRows) {
               const treeSelectedKeys = selectedRows.map(({ key }) => key);
               const diffKeys = selected

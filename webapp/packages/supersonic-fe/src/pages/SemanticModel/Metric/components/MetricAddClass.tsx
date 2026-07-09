@@ -83,7 +83,7 @@ const MetricAddClass: React.FC<Props> = ({ ids = [], createModalVisible, onCance
   return (
     <Modal
       width={600}
-      destroyOnClose
+      destroyOnHidden
       title="批量分类"
       open={createModalVisible}
       footer={renderFooter()}

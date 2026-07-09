@@ -28,7 +28,7 @@ export const ColumnsConfig = (params?: ColumnsConfigParams) => {
     classifications: string[] | undefined,
   ) => (
     <div style={{ marginTop: 8 }}>
-      <Space direction="vertical" size={4}>
+      <Space orientation="vertical" size={4}>
         {alias && (
           <Space size={4} style={{ color: '#5f748d', fontSize: 12, margin: '5px 0 5px 0' }}>
             <ReadOutlined />
@@ -273,7 +273,7 @@ export const ColumnsConfig = (params?: ColumnsConfigParams) => {
       width: 180,
       search: false,
       render: (value: any, record: ISemantic.IMetricItem) => (
-        <Space direction="vertical">
+        <Space orientation="vertical">
           <span> {record.createdBy}</span>
           <span>{value && value !== '-' ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'}</span>
         </Space>

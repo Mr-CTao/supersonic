@@ -48,7 +48,6 @@ export type CreateFormProps = {
   onSubmit?: (values: any) => void;
 };
 
-const { Step } = Steps;
 const FormItem = Form.Item;
 const { TextArea } = Input;
 const { Option } = Select;
@@ -842,7 +841,7 @@ const MetricInfoCreateForm: React.FC<CreateFormProps> = ({
       width={800}
       style={{ top: 48 }}
       // styles={{ padding: '32px 40px 48px' }}
-      destroyOnClose
+      destroyOnHidden
       title={`${isEdit ? '编辑' : '新建'}指标`}
       maskClosable={false}
       open={createModalVisible}
@@ -851,10 +850,12 @@ const MetricInfoCreateForm: React.FC<CreateFormProps> = ({
     >
       {hasMeasuresState ? (
         <>
-          <Steps style={{ marginBottom: 28 }} size="small" current={currentStep}>
-            <Step title="基本信息" />
-            <Step title="表达式" />
-          </Steps>
+          <Steps
+            style={{ marginBottom: 28 }}
+            size="small"
+            current={currentStep}
+            items={[{ title: '基本信息' }, { title: '表达式' }]}
+          />
           <Form
             {...formLayout}
             form={form}

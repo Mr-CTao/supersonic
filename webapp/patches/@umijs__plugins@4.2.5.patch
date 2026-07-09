@@ -1,0 +1,26 @@
+diff --git a/dist/antd.js b/dist/antd.js
+index a8af888dfd77622d33025634f52c000e176e26d5..15bf2710a2fd95f6a230cb5ef7bc93bb4ddcc092 100644
+--- a/dist/antd.js
++++ b/dist/antd.js
+@@ -53,7 +53,7 @@ var antd_default = (api) => {
+     antdVersion = require(`${pkgPath}/package.json`).version;
+   } catch (e) {
+   }
+-  const isV5 = antdVersion.startsWith("5");
++  const isV5 = antdVersion.startsWith("5") || antdVersion.startsWith("6");
+   const isV4 = antdVersion.startsWith("4");
+   const appComponentAvailable = import_plugin_utils.semver.gte(antdVersion, "5.1.0");
+   const appConfigAvailable = import_plugin_utils.semver.gte(antdVersion, "5.3.0");
+diff --git a/dist/layout.js b/dist/layout.js
+index 3d4b6af330e208acedf3d9ad7314bb2aa3eb8a00..698a94ab57d0f401422f95bc0f828b7cd74e370b 100644
+--- a/dist/layout.js
++++ b/dist/layout.js
+@@ -66,7 +66,7 @@ var layout_default = (api) => {
+   } catch (e) {
+   }
+   const packageName = api.pkg.name || "plugin-layout";
+-  const isAntd5 = antdVersion.startsWith("5");
++  const isAntd5 = antdVersion.startsWith("5") || antdVersion.startsWith("6");
+   const layoutFile = isAntd5 ? "Layout.css" : "Layout.less";
+   api.describe({
+     key: "layout",

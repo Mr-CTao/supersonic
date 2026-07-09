@@ -18,6 +18,7 @@ import { ColumnType } from '../../../common/type';
 import { Spin } from 'antd';
 import { ChartItemContext } from '../../ChatItem';
 import { useExportByEcharts } from '../../../hooks';
+import { renderChartWhenContainerReady } from '../chartContainer';
 import { normalizeChartCategoryName, toFiniteChartNumber } from '../chartData';
 
 type Props = {
@@ -61,6 +62,9 @@ const BarChart: React.FC<Props> = ({
 
   // 将查询结果规整成 ECharts 柱状图数据，非法指标值不参与图表渲染但仍保留在表格视图中。
   const renderChart = () => {
+    if (!chartRef.current) {
+      return;
+    }
     let instanceObj: any;
     if (!instanceRef.current) {
       instanceObj = echarts.init(chartRef.current);
@@ -181,7 +185,7 @@ const BarChart: React.FC<Props> = ({
 
   useEffect(() => {
     if (queryResults && queryResults.length > 0 && metricColumn?.authorized) {
-      renderChart();
+      return renderChartWhenContainerReady(() => chartRef.current, renderChart);
     }
   }, [queryResults]);
 

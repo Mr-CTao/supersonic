@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Input, Spin, Select, message } from 'antd';
-import type { FormInstance } from 'antd/lib/form';
+import type { FormInstance } from 'antd';
 import {getDbNames, getTables, getDimensionList, getCatalogs} from '../../service';
 import { ISemantic } from '../../data';
 import FormItemTitle from '@/components/FormHelper/FormItemTitle';

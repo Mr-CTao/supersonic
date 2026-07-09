@@ -17,7 +17,7 @@ const FormItemTitle: React.FC<IProps> = ({
   onSubTitleChange,
 }) => {
   return (
-    <Space direction="vertical" size={2} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={2} style={{ width: '100%' }}>
       <div className={styles.title}>{title}</div>
       <div className={styles.subTitleContainer}>
         {subTitleEditable ? (

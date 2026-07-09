@@ -39,7 +39,7 @@ const CreateRelationModal = (props: Props) => {
   return (
     <Modal
       title="关联模型"
-      visible={visible}
+      open={visible}
       confirmLoading={confirmLoading}
       wrapClassName="create-relation-container"
       okText="确定"
@@ -48,7 +48,7 @@ const CreateRelationModal = (props: Props) => {
       onCancel={onCancel}
       mask={false}
       centered
-      destroyOnClose={true}
+      destroyOnHidden={true}
     >
       <Form form={form}>
         <Form.Item

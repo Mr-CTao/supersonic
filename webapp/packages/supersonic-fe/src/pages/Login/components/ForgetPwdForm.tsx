@@ -55,7 +55,7 @@ const ForgetPwdForm: React.FC<RegisterFormProps> = (props) => {
     <Modal
       width={600}
       styles={{ padding: '32px 40px 48px' }}
-      destroyOnClose
+      destroyOnHidden
       title="忘记密码"
       open={createModalVisible}
       footer={renderFooter()}

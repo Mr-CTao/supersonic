@@ -26,7 +26,7 @@ const DimensionValueFilterModal: React.FC<Props> = ({
     <>
       <Modal
         width={800}
-        destroyOnClose
+        destroyOnHidden
         title={`维度值过滤`}
         style={{ top: 48 }}
         maskClosable={false}

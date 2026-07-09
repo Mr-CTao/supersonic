@@ -363,9 +363,8 @@ const DynamicDate: React.FC<Props> = forwardRef(
                 }
                 onAdvanceSettingCollapsedChange?.(true);
               }}
-              bordered={false}
               ghost={true}
-              expandIconPosition="right"
+              expandIconPosition="end"
             >
               <Panel
                 header=""
@@ -396,7 +395,7 @@ const DynamicDate: React.FC<Props> = forwardRef(
                   }}
                   value={advancedConfigType}
                 >
-                  <Space direction="vertical">
+                  <Space orientation="vertical">
                     <Radio value={DynamicAdvancedConfigType.LAST}>
                       <Space size={10}>
                         <span className={styles.advancedSettingItemText}>最近</span>

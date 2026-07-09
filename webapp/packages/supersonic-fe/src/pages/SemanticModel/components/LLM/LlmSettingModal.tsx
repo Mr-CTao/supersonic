@@ -79,7 +79,7 @@ const DatabaseSettingModal: React.FC<CreateFormProps> = ({ onCancel, llmItem, op
   return (
     <Modal
       width={800}
-      destroyOnClose
+      destroyOnHidden
       title="大模型设置"
       style={{ top: 48 }}
       maskClosable={false}

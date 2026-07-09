@@ -1,6 +1,6 @@
 import type { API } from '@/services/API';
 import { ISemantic } from './data';
-import type { DataNode } from 'antd/lib/tree';
+import type { TreeDataNode } from 'antd';
 import { Form, Input, InputNumber, Switch, Select, Slider } from 'antd';
 import FormItemTitle from '@/components/FormHelper/FormItemTitle';
 import DisabledWheelNumberInput from '@/components/DisabledWheelNumberInput';
@@ -14,9 +14,9 @@ import { openNewPage } from '@/utils/utils';
 const FormItem = Form.Item;
 const { TextArea } = Input;
 
-export const changeTreeData = (treeData: API.DomainList, auth?: boolean): DataNode[] => {
+export const changeTreeData = (treeData: API.DomainList, auth?: boolean): TreeDataNode[] => {
   return treeData.map((item: any) => {
-    const newItem: DataNode = {
+    const newItem: TreeDataNode = {
       ...item,
       key: item.id,
       disabled: auth,

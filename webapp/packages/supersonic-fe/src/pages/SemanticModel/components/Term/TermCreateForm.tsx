@@ -104,7 +104,7 @@ const TermCreateForm: React.FC<CreateFormProps> = ({
       forceRender
       width={800}
       style={{ top: 48 }}
-      destroyOnClose
+      destroyOnHidden
       title={`${isEdit ? '编辑' : '新建'}术语`}
       maskClosable={false}
       open={createModalVisible}

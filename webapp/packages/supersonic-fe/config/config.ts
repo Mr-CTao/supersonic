@@ -211,5 +211,6 @@ export default defineConfig({
   alias: {
     'supersonic-chat-sdk': path.resolve(__dirname, '../../chat-sdk/src/'),
   },
-  // esbuildMinifyIIFE: true,
+  // Ant Design 6 升级后依赖图发生变化，开启 IIFE 包裹可避免 esbuild helper 在异步分包中命名冲突。
+  esbuildMinifyIIFE: true,
 });

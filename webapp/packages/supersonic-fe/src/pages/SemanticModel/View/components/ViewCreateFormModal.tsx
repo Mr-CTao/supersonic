@@ -19,7 +19,6 @@ export type ModelCreateFormModalProps = {
   onCancel: () => void;
   onSubmit: (values: any) => void;
 };
-const { Step } = Steps;
 const ViewCreateFormModal: React.FC<ModelCreateFormModalProps> = ({
   step = 0,
   viewItem,
@@ -252,17 +251,19 @@ const ViewCreateFormModal: React.FC<ModelCreateFormModalProps> = ({
   return (
     <Modal
       width={modalWidth}
-      destroyOnClose
+      destroyOnHidden
       title={'数据集信息'}
       open={true}
       maskClosable={false}
       footer={renderFooter()}
       onCancel={onCancel}
     >
-      <Steps style={{ marginBottom: 28 }} size="small" current={currentStep}>
-        <Step title="基本信息" />
-        <Step title="关联信息" />
-      </Steps>
+      <Steps
+        style={{ marginBottom: 28 }}
+        size="small"
+        current={currentStep}
+        items={[{ title: '基本信息' }, { title: '关联信息' }]}
+      />
       <Form
         {...formLayout}
         form={form}

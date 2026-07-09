@@ -22,7 +22,6 @@ export type CreateFormProps = {
   onSubmit?: (values: any) => void;
 };
 
-const { Step } = Steps;
 const FormItem = Form.Item;
 const { TextArea } = Input;
 const { Option } = Select;
@@ -540,7 +539,7 @@ const TagInfoCreateForm: React.FC<CreateFormProps> = ({
       forceRender
       width={800}
       style={{ top: 48 }}
-      destroyOnClose
+      destroyOnHidden
       title={`${isEdit ? '编辑' : '新建'}标签`}
       maskClosable={false}
       open={createModalVisible}
@@ -548,10 +547,12 @@ const TagInfoCreateForm: React.FC<CreateFormProps> = ({
       onCancel={onCancel}
     >
       <>
-        <Steps style={{ marginBottom: 28 }} size="small" current={currentStep}>
-          <Step title="基本信息" />
-          <Step title="表达式" />
-        </Steps>
+        <Steps
+          style={{ marginBottom: 28 }}
+          size="small"
+          current={currentStep}
+          items={[{ title: '基本信息' }, { title: '表达式' }]}
+        />
         <Form
           {...formLayout}
           form={form}

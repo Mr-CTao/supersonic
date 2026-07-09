@@ -88,7 +88,7 @@ const MetricTrend: React.FC<Props> = ({
               <div>
                 <Select
                   defaultValue="line"
-                  bordered={false}
+                  variant="borderless"
                   options={metricChartSelectOptions}
                   onChange={(value: string) => setChartType(value)}
                 />
