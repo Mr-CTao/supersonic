@@ -10,13 +10,24 @@
  * - 连接测试、能力保存、消息发送等提交类操作均使用 loading 状态锁定按钮；
  * - 会话调试同一时间只允许一个发送请求，避免前端重复点击造成同会话消息顺序混乱。
  */
+import {
+  CodeOutlined,
+  CopyOutlined,
+  DeleteOutlined,
+  DownOutlined,
+  OpenAIOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
+import type { BubbleItemType, BubbleListProps } from '@ant-design/x';
+import { Bubble, Sender, Think } from '@ant-design/x';
 import {
   Alert,
   Button,
   Col,
   Descriptions,
+  Dropdown,
   Drawer,
   Form,
   Input,
@@ -39,6 +50,7 @@ import LlmSettingModal from './LlmSettingModal';
 import { ISemantic } from '../../data';
 import { deleteLlmConfig } from '../../service';
 import { getLlmList, testLLMConn } from '@/services/system';
+import { copyText } from '@/utils/utils';
 import {
   createLlmConversation,
   getLlmCapabilities,
@@ -69,6 +81,7 @@ type LlmMessage = {
 };
 
 type LlmDebugTurn = {
+  id: string;
   role: 'user' | 'assistant';
   content?: string;
   reasoningContent?: string;
@@ -210,6 +223,269 @@ const formatJson = (value: any) => {
     }
   }
   return JSON.stringify(value, null, 2);
+};
+
+/**
+ * 生成会话调试消息对象。
+ *
+ * @param sequenceRef 当前 Tab 内的消息序号；只在组件实例内递增，不涉及跨用户共享状态。
+ * @param turn 待写入的调试消息。
+ * @returns 带稳定 key 的调试消息，供 Bubble.List 受控渲染。
+ * @throws 不抛出异常。
+ */
+const createDebugTurn = (
+  sequenceRef: React.MutableRefObject<number>,
+  turn: Omit<LlmDebugTurn, 'id'>,
+): LlmDebugTurn => {
+  sequenceRef.current += 1;
+  return {
+    id: `llm-debug-${Date.now()}-${sequenceRef.current}`,
+    ...turn,
+  };
+};
+
+type DebugCopyButtonProps = {
+  title: string;
+  value?: string;
+};
+
+type DebugSenderTextAreaProps = React.ComponentProps<typeof Input.TextArea>;
+
+/**
+ * 渲染 Ant Design X Sender 的无边框输入区。
+ *
+ * @param props Sender 透传给输入组件的 TextArea 属性。
+ * @returns 去掉内层边框和焦点描边后的 TextArea。
+ * @throws 不抛出异常。
+ */
+const DebugSenderTextArea = React.forwardRef<any, DebugSenderTextAreaProps>(
+  ({ style, ...restProps }, ref) => {
+    return (
+      <Input.TextArea
+        {...restProps}
+        ref={ref}
+        variant="borderless"
+        style={{
+          ...style,
+          background: 'transparent',
+          border: 'none',
+          boxShadow: 'none',
+          fontSize: 15,
+          lineHeight: 1.65,
+          outline: 'none',
+          padding: 0,
+          resize: 'none',
+        }}
+      />
+    );
+  },
+);
+DebugSenderTextArea.displayName = 'DebugSenderTextArea';
+
+const debugSenderFooterButtonStyle: React.CSSProperties = {
+  borderRadius: 8,
+  boxShadow: '0 2px 8px rgba(15, 23, 42, 0.06)',
+  fontSize: 15,
+  height: 40,
+  paddingInline: 14,
+};
+
+/**
+ * 获取 Sender footer 输出模式按钮文案。
+ *
+ * @param value 当前响应格式。
+ * @returns 输出模式展示文案。
+ * @throws 不抛出异常。
+ */
+const getResponseFormatLabel = (value?: string) => {
+  return value === 'json' ? 'JSON Output' : 'Text Output';
+};
+
+/**
+ * 获取 Sender footer 推理强度按钮文案。
+ *
+ * @param value 当前 reasoning effort。
+ * @returns 推理强度展示文案。
+ * @throws 不抛出异常。
+ */
+const getReasoningEffortLabel = (value?: string) => {
+  return `Effort: ${value === 'max' ? 'max' : 'high'}`;
+};
+
+/**
+ * 渲染调试信息复制按钮。
+ *
+ * @param props 复制按钮标题和待复制文本。
+ * @returns 紧凑 icon-only 复制按钮。
+ * @throws 不抛出异常；复制反馈由 copyText 统一处理。
+ */
+const DebugCopyButton: React.FC<DebugCopyButtonProps> = ({ title, value }) => {
+  const disabled = !value || value === '-';
+  return (
+    <Tooltip title={title}>
+      <Button
+        aria-label={title}
+        size="small"
+        type="text"
+        icon={<CopyOutlined />}
+        disabled={disabled}
+        onClick={() => {
+          if (value && value !== '-') {
+            copyText(value);
+          }
+        }}
+      />
+    </Tooltip>
+  );
+};
+
+/**
+ * 获取 assistant 气泡中优先展示的正文。
+ *
+ * @param turn assistant 调试消息。
+ * @returns 正常响应、错误信息或占位文本。
+ * @throws 不抛出异常。
+ */
+const getAssistantDisplayContent = (turn: LlmDebugTurn) => {
+  return turn.content || turn.errorMessage || '-';
+};
+
+/**
+ * 渲染 assistant 响应下方的调试指标。
+ *
+ * @param turn assistant 调试消息。
+ * @returns token、耗时、request id 和错误码等脱敏调试信息。
+ * @throws 不抛出异常。
+ */
+const renderAssistantDebugFooter = (turn: LlmDebugTurn) => {
+  const parsedJsonText = formatJson(turn.parsedJson);
+  return (
+    <Space size={[4, 4]} wrap style={{ maxWidth: '100%' }}>
+      <Tag color={turn.status === 'FAILED' ? 'red' : 'green'}>{turn.status || 'SUCCESS'}</Tag>
+      {turn.errorCode && (
+        <Tooltip title={getNormalizedErrorText(turn.errorCode)}>
+          <Tag color="red">{turn.errorCode}</Tag>
+        </Tooltip>
+      )}
+      <Tag color="blue">{turn.latencyMs ?? '-'} ms</Tag>
+      <Tag>Prompt {turn.promptTokens ?? '-'}</Tag>
+      <Tag>Completion {turn.completionTokens ?? '-'}</Tag>
+      <Tag>Total {turn.totalTokens ?? '-'}</Tag>
+      {turn.providerRequestId && <Tag color="purple">Request ID</Tag>}
+      <DebugCopyButton title="复制响应" value={getAssistantDisplayContent(turn)} />
+      <DebugCopyButton title="复制 JSON" value={parsedJsonText} />
+      <DebugCopyButton title="复制 Request ID" value={turn.providerRequestId} />
+    </Space>
+  );
+};
+
+/**
+ * 渲染 assistant 气泡正文。
+ *
+ * @param turn assistant 调试消息。
+ * @returns 响应正文、思考内容和 JSON Output 展示区。
+ * @throws 不抛出异常。
+ */
+const renderAssistantDebugContent = (turn: LlmDebugTurn) => {
+  const parsedJsonText = formatJson(turn.parsedJson);
+  const hasParsedJson = parsedJsonText !== '-';
+  return (
+    <div style={{ maxWidth: '100%' }}>
+      <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+        {getAssistantDisplayContent(turn)}
+      </Paragraph>
+      {turn.reasoningContent && (
+        <Think
+          title="Reasoning Content"
+          defaultExpanded={false}
+          style={{ marginTop: 10 }}
+          styles={{
+            content: {
+              color: 'rgba(0, 0, 0, 0.65)',
+              whiteSpace: 'pre-wrap',
+            },
+          }}
+        >
+          {turn.reasoningContent}
+        </Think>
+      )}
+      {hasParsedJson && (
+        <pre
+          style={{
+            background: '#f6f8fa',
+            border: '1px solid #f0f0f0',
+            borderRadius: 6,
+            margin: '10px 0 0',
+            maxHeight: 260,
+            overflow: 'auto',
+            padding: 10,
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {parsedJsonText}
+        </pre>
+      )}
+      {turn.errorMessage && turn.content && (
+        <Alert
+          showIcon
+          type="error"
+          style={{ marginTop: 10 }}
+          title={turn.errorMessage}
+        />
+      )}
+    </div>
+  );
+};
+
+/**
+ * 将 Gateway 调试消息映射为 Ant Design X Bubble.List 数据。
+ *
+ * @param turns 当前本地调试消息序列。
+ * @returns Bubble.List 受控数据项。
+ * @throws 不抛出异常。
+ */
+const buildDebugBubbleItems = (turns: LlmDebugTurn[]): BubbleItemType[] => {
+  return turns.map((turn) => {
+    if (turn.role === 'user') {
+      return {
+        key: turn.id,
+        role: 'user',
+        content: turn.content || '-',
+      };
+    }
+    return {
+      key: turn.id,
+      role: 'ai',
+      content: renderAssistantDebugContent(turn),
+      footer: renderAssistantDebugFooter(turn),
+      status: turn.status === 'FAILED' ? 'error' : 'success',
+    };
+  });
+};
+
+const debugBubbleRole: BubbleListProps['role'] = {
+  user: {
+    placement: 'end',
+    shape: 'corner',
+    variant: 'filled',
+    styles: {
+      content: {
+        background: '#e6f4ff',
+        whiteSpace: 'pre-wrap',
+      },
+    },
+  },
+  ai: {
+    placement: 'start',
+    shape: 'corner',
+    variant: 'outlined',
+    styles: {
+      content: {
+        maxWidth: 760,
+      },
+    },
+    footerPlacement: 'outer-start',
+  },
 };
 
 const LlmTable: React.FC = () => {
@@ -650,7 +926,7 @@ const CapabilityTab: React.FC<CapabilityTabProps> = ({ llmList, capabilities, on
         showIcon
         type="info"
         style={{ marginBottom: 12 }}
-        message="DeepSeek 的对话前缀续写、FIM 补全和 strict tool calling 属于 Beta 能力，需要使用独立 Beta Base URL，不能覆盖普通 /chat/completions。"
+        title="DeepSeek 的对话前缀续写、FIM 补全和 strict tool calling 属于 Beta 能力，需要使用独立 Beta Base URL，不能覆盖普通 /chat/completions。"
       />
       <ProTable<LlmModelCapability>
         rowKey={(record) => `${record.chatModelId}-${record.modelName}`}
@@ -740,7 +1016,13 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
   const [conversationId, setConversationId] = useState<number>();
   const [turns, setTurns] = useState<LlmDebugTurn[]>([]);
   const [sending, setSending] = useState<boolean>(false);
+  const [draftMessage, setDraftMessage] = useState<string>('');
   const [conversationMessages, setConversationMessages] = useState<LlmMessage[]>([]);
+  const turnSequenceRef = useRef<number>(0);
+  const watchedChatModelId = Form.useWatch('chatModelId', form);
+  const watchedResponseFormat = Form.useWatch('responseFormat', form) || 'text';
+  const watchedThinkingEnabled = Form.useWatch('thinkingEnabled', form);
+  const watchedReasoningEffort = Form.useWatch('reasoningEffort', form) || 'high';
 
   // 从连接配置页跳转调试时预填连接和模型名，降低管理员重复选择成本。
   useEffect(() => {
@@ -751,6 +1033,24 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
       });
     }
   }, [selectedModel, form]);
+
+  // Bubble.List 是受控组件，使用 memo 避免表单状态变化时重复构造复杂消息节点。
+  const bubbleItems = useMemo(() => buildDebugBubbleItems(turns), [turns]);
+  const selectedConnection = useMemo(() => {
+    return llmList.find((item) => item.id === watchedChatModelId);
+  }, [llmList, watchedChatModelId]);
+
+  /**
+   * 更新 Sender footer 中的调试参数。
+   *
+   * @param field 调试参数字段名。
+   * @param value 调试参数值。
+   * @returns 无返回值。
+   * @throws 不抛出异常；字段值由 Ant Design Form 维护。
+   */
+  const updateDebugOption = (field: string, value: any) => {
+    form.setFieldValue(field, value);
+  };
 
   // 首轮发送前创建本地会话，后续消息都复用 conversationId，让 Gateway 拼接完整 messages。
   const handleCreateConversation = async (values: any) => {
@@ -777,21 +1077,41 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
   };
 
   // 串行发送消息，保证前端视图顺序和后端会话消息顺序一致。
-  const handleSend = async () => {
-    const values = await form.validateFields();
-    const userContent = values.content;
-    setTurns((prev) => [...prev, { role: 'user', content: userContent }]);
+  const handleSend = async (messageContent?: string) => {
+    const userContent = (messageContent || draftMessage || '').trim();
+    if (!userContent) {
+      message.warning('请输入消息');
+      return;
+    }
+    let values: any;
+    try {
+      const validatedValues = await form.validateFields();
+      // hidden 字段由 Sender footer 控件维护，这里合并完整表单值，避免调试参数被校验结果裁掉。
+      values = {
+        ...form.getFieldsValue(true),
+        ...validatedValues,
+      };
+    } catch (error: any) {
+      if (!error?.errorFields) {
+        message.error(getRequestErrorText(error));
+      }
+      return;
+    }
+    setTurns((prev) => [
+      ...prev,
+      createDebugTurn(turnSequenceRef, { role: 'user', content: userContent }),
+    ]);
     setSending(true);
     try {
       const nextConversationId = conversationId || (await handleCreateConversation(values));
       if (!nextConversationId) {
         setTurns((prev) => [
           ...prev,
-          {
+          createDebugTurn(turnSequenceRef, {
             role: 'assistant',
             status: 'FAILED',
             errorMessage: '创建调试会话失败，请检查登录态或后端 Gateway 服务。',
-          },
+          }),
         ]);
         return;
       }
@@ -802,26 +1122,27 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
         maxTokens: values.maxTokens,
         timeoutMs: values.timeoutMs,
         stream: false,
-        thinkingEnabled: values.thinkingEnabled,
+        // 必须显式传 false；否则首次发送时 undefined 会被后端/供应商默认策略当作开启 Thinking。
+        thinkingEnabled: Boolean(values.thinkingEnabled),
         reasoningEffort: values.reasoningEffort,
       });
       if (!isSuccessResponse(response)) {
         message.error(response?.msg || '发送消息失败');
         setTurns((prev) => [
           ...prev,
-          {
+          createDebugTurn(turnSequenceRef, {
             role: 'assistant',
             status: 'FAILED',
             errorCode: response?.errorCode,
             errorMessage: response?.msg || '发送消息失败',
-          },
+          }),
         ]);
         return;
       }
       const data = unwrapData(response);
       setTurns((prev) => [
         ...prev,
-        {
+        createDebugTurn(turnSequenceRef, {
           role: 'assistant',
           content: data?.assistantContent,
           reasoningContent: data?.reasoningContent,
@@ -834,9 +1155,9 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
           totalTokens: data?.totalTokens,
           latencyMs: data?.latencyMs,
           providerRequestId: data?.providerRequestId,
-        },
+        }),
       ]);
-      form.setFieldValue('content', undefined);
+      setDraftMessage('');
       const conversationResponse = await getLlmConversation(nextConversationId);
       if (isSuccessResponse(conversationResponse)) {
         setConversationMessages(unwrapData(conversationResponse)?.messages || []);
@@ -845,11 +1166,11 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
       message.error(getRequestErrorText(error));
       setTurns((prev) => [
         ...prev,
-        {
+        createDebugTurn(turnSequenceRef, {
           role: 'assistant',
           status: 'FAILED',
           errorMessage: getRequestErrorText(error),
-        },
+        }),
       ]);
     } finally {
       setSending(false);
@@ -861,155 +1182,292 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
     setConversationId(undefined);
     setTurns([]);
     setConversationMessages([]);
-    form.setFieldValue('content', undefined);
+    turnSequenceRef.current = 0;
+    setDraftMessage('');
   };
 
   return (
-    <Row gutter={16}>
-      <Col span={8}>
+    <Row gutter={[16, 16]}>
+      <Col xs={24} xl={7}>
         <Form
           form={form}
           layout="vertical"
           initialValues={{
             responseFormat: 'text',
+            thinkingEnabled: false,
             systemPrompt: DEFAULT_SYSTEM_PROMPT,
             reasoningEffort: 'high',
             temperature: 0,
             timeoutMs: 60000,
           }}
         >
-          <Form.Item name="chatModelId" label="连接" rules={[{ required: true, message: '请选择连接' }]}>
-            <Select
-              placeholder="选择 DeepSeek 连接"
-              options={llmList.map((item) => ({
-                label: `${item.name} / ${item.config?.modelName || '-'}`,
-                value: item.id,
-              }))}
-              onChange={(value) => {
-                const target = llmList.find((item) => item.id === value);
-                form.setFieldValue('modelName', target?.config?.modelName);
-              }}
-            />
-          </Form.Item>
-          <Form.Item name="modelName" label="模型名称">
-            <Input placeholder="默认使用连接中的模型名称" />
-          </Form.Item>
-          <Form.Item name="systemPrompt" label="System Prompt">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="responseFormat" label="输出模式">
-                <Select
-                  options={[
-                    { label: 'Text', value: 'text' },
-                    { label: 'JSON Output', value: 'json' },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="thinkingEnabled" label="Thinking" valuePropName="checked">
-                <Switch />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="temperature" label="Temperature">
-                <InputNumber style={{ width: '100%' }} min={0} max={2} step={0.1} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="maxTokens" label="Max Tokens">
-                <InputNumber style={{ width: '100%' }} min={1} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="reasoningEffort" label="Reasoning Effort">
-            <Select
-              options={[
-                { label: 'high', value: 'high' },
-                { label: 'max', value: 'max' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="timeoutMs" label="Timeout(ms)">
-            <InputNumber style={{ width: '100%' }} min={1000} />
-          </Form.Item>
-          <Form.Item name="content" label="用户消息" rules={[{ required: true, message: '请输入消息' }]}>
-            <Input.TextArea rows={5} placeholder="建议先发一轮，再追问第二轮以验证完整 messages 拼接" />
-          </Form.Item>
-          <Space>
-            <Button type="primary" loading={sending} onClick={handleSend}>
-              发送
-            </Button>
-            <Button onClick={handleClear}>清空会话</Button>
-          </Space>
+          <div
+            style={{
+              background: '#fff',
+              border: '1px solid #f0f0f0',
+              borderRadius: 8,
+              padding: 16,
+            }}
+          >
+            <Form.Item name="responseFormat" hidden>
+              <Input />
+            </Form.Item>
+            <Form.Item name="thinkingEnabled" valuePropName="checked" hidden>
+              <Switch />
+            </Form.Item>
+            <Form.Item name="reasoningEffort" hidden>
+              <Input />
+            </Form.Item>
+            <Form.Item name="chatModelId" label="连接" rules={[{ required: true, message: '请选择连接' }]}>
+              <Select
+                placeholder="选择 DeepSeek 连接"
+                options={llmList.map((item) => ({
+                  label: `${item.name} / ${item.config?.modelName || '-'}`,
+                  value: item.id,
+                }))}
+                onChange={(value) => {
+                  const target = llmList.find((item) => item.id === value);
+                  form.setFieldValue('modelName', target?.config?.modelName);
+                }}
+              />
+            </Form.Item>
+            <Form.Item name="modelName" label="模型名称">
+              <Input placeholder="默认使用连接中的模型名称" />
+            </Form.Item>
+            <Form.Item name="systemPrompt" label="System Prompt">
+              <Input.TextArea rows={3} />
+            </Form.Item>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="temperature" label="Temperature">
+                  <InputNumber style={{ width: '100%' }} min={0} max={2} step={0.1} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="maxTokens" label="Max Tokens">
+                  <InputNumber style={{ width: '100%' }} min={1} />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Form.Item name="timeoutMs" label="Timeout(ms)">
+              <InputNumber style={{ width: '100%' }} min={1000} />
+            </Form.Item>
+          </div>
         </Form>
       </Col>
-      <Col span={16}>
-        <Space style={{ marginBottom: 12 }} size={16}>
-          <Text>Conversation ID：{conversationId || '-'}</Text>
-          <Text>Messages：{conversationMessages.length}</Text>
-          <Text>
-            估算 Token：
-            {conversationMessages.reduce((sum, item) => sum + Math.max(1, (item.content || '').length / 4), 0).toFixed(0)}
-          </Text>
-        </Space>
-        <div style={{ minHeight: 480, border: '1px solid #f0f0f0', padding: 12, background: '#fff' }}>
-          {turns.length === 0 ? (
-            <Alert showIcon type="info" message="选择连接后发送消息，第二轮会自动复用同一个本地 conversation。JSON Output 失败会展示统一错误码。" />
-          ) : (
-            turns.map((turn, index) => (
-              <div key={`${turn.role}-${index}`} style={{ marginBottom: 12 }}>
-                <Tag color={turn.role === 'user' ? 'blue' : 'green'}>{turn.role}</Tag>
-                <Paragraph style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
-                  {turn.content || '-'}
-                </Paragraph>
-                {turn.role === 'assistant' && (
-                  <Descriptions size="small" bordered column={3}>
-                    <Descriptions.Item label="状态">{turn.status || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="错误码">
-                      {turn.errorCode ? (
-                        <Tooltip title={getNormalizedErrorText(turn.errorCode)}>
-                          <Tag color="red">{turn.errorCode}</Tag>
-                        </Tooltip>
-                      ) : (
-                        '-'
-                      )}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="耗时">{turn.latencyMs ?? '-'} ms</Descriptions.Item>
-                    <Descriptions.Item label="Prompt Tokens">
-                      {turn.promptTokens ?? '-'}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="Completion Tokens">
-                      {turn.completionTokens ?? '-'}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="Total Tokens">
-                      {turn.totalTokens ?? '-'}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="Provider Request ID" span={3}>
-                      {turn.providerRequestId || '-'}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="Reasoning Content" span={3}>
-                      <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
-                        {turn.reasoningContent || '-'}
-                      </Paragraph>
-                    </Descriptions.Item>
-                    <Descriptions.Item label="Parsed JSON" span={3}>
-                      <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
-                        {formatJson(turn.parsedJson)}
-                      </pre>
-                    </Descriptions.Item>
-                    <Descriptions.Item label="错误信息" span={3}>
-                      {turn.errorMessage || '-'}
-                    </Descriptions.Item>
-                  </Descriptions>
-                )}
-              </div>
-            ))
-          )}
+      <Col xs={24} xl={17}>
+        <div
+          style={{
+            background: '#fff',
+            border: '1px solid #f0f0f0',
+            borderRadius: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            height: 'calc(100vh - 170px)',
+            minHeight: 640,
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              alignItems: 'center',
+              borderBottom: '1px solid #f0f0f0',
+              display: 'flex',
+              gap: 12,
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+            }}
+          >
+            <Space size={[12, 4]} wrap>
+              <Text>Conversation ID：{conversationId || '-'}</Text>
+              <Text>Messages：{conversationMessages.length}</Text>
+              <Text>
+                估算 Token：
+                {conversationMessages.reduce((sum, item) => sum + Math.max(1, (item.content || '').length / 4), 0).toFixed(0)}
+              </Text>
+            </Space>
+            <Tooltip title="清空会话">
+              <Button
+                aria-label="清空会话"
+                icon={<DeleteOutlined />}
+                size="small"
+                onClick={handleClear}
+                disabled={sending}
+              />
+            </Tooltip>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, padding: 16 }}>
+            {bubbleItems.length === 0 ? (
+              <Alert
+                showIcon
+                type="info"
+                title="选择连接后发送消息，第二轮会自动复用同一个本地 conversation。JSON Output 失败会展示统一错误码。"
+              />
+            ) : (
+              <Bubble.List
+                autoScroll
+                items={bubbleItems}
+                role={debugBubbleRole}
+                style={{ height: '100%' }}
+                styles={{
+                  scroll: {
+                    paddingInlineEnd: 8,
+                  },
+                }}
+              />
+            )}
+          </div>
+          <div
+            style={{
+              borderTop: '1px solid #f0f0f0',
+              padding: 16,
+            }}
+          >
+            <Sender
+              value={draftMessage}
+              loading={sending}
+              disabled={sending}
+              placeholder="输入调试消息"
+              submitType="enter"
+              autoSize={{ minRows: 2, maxRows: 6 }}
+              components={{ input: DebugSenderTextArea }}
+              footer={() => (
+                <div
+                  style={{
+                    alignItems: 'center',
+                    display: 'flex',
+                    gap: 8,
+                    justifyContent: 'flex-start',
+                    minHeight: 32,
+                  }}
+                >
+                  <Space size={[10, 8]} wrap>
+                    <Tag
+                      color="blue"
+                      style={{
+                        alignItems: 'center',
+                        borderRadius: 8,
+                        display: 'inline-flex',
+                        fontSize: 14,
+                        height: 40,
+                        marginInlineEnd: 0,
+                        paddingInline: 12,
+                      }}
+                    >
+                      {selectedConnection?.name || selectedConnection?.config?.provider || 'Gateway'}
+                    </Tag>
+                    <Dropdown
+                      trigger={['click']}
+                      disabled={sending}
+                      menu={{
+                        selectedKeys: [watchedResponseFormat],
+                        items: [
+                          { key: 'text', label: 'Text Output' },
+                          { key: 'json', label: 'JSON Output' },
+                        ],
+                        onClick: ({ key }) => updateDebugOption('responseFormat', key),
+                      }}
+                    >
+                      <Button
+                        icon={<CodeOutlined />}
+                        style={debugSenderFooterButtonStyle}
+                      >
+                        {getResponseFormatLabel(watchedResponseFormat)}
+                        <DownOutlined style={{ fontSize: 12 }} />
+                      </Button>
+                    </Dropdown>
+                    <Sender.Switch
+                      value={Boolean(watchedThinkingEnabled)}
+                      disabled={sending}
+                      icon={<OpenAIOutlined />}
+                      checkedChildren="Deep Think: on"
+                      unCheckedChildren="Deep Think: off"
+                      onChange={(checked) => updateDebugOption('thinkingEnabled', checked)}
+                      styles={{
+                        content: debugSenderFooterButtonStyle,
+                      }}
+                    />
+                    <Tooltip
+                      title={watchedThinkingEnabled ? 'Reasoning Effort' : '开启 Thinking 后可调整 Reasoning Effort'}
+                    >
+                      <span>
+                        <Dropdown
+                          trigger={['click']}
+                          disabled={sending || !watchedThinkingEnabled}
+                          menu={{
+                            selectedKeys: [watchedReasoningEffort],
+                            items: [
+                              { key: 'high', label: 'Effort: high' },
+                              { key: 'max', label: 'Effort: max' },
+                            ],
+                            onClick: ({ key }) => updateDebugOption('reasoningEffort', key),
+                          }}
+                        >
+                          <Button
+                            icon={<ThunderboltOutlined />}
+                            disabled={sending || !watchedThinkingEnabled}
+                            style={debugSenderFooterButtonStyle}
+                          >
+                            {getReasoningEffortLabel(watchedReasoningEffort)}
+                            <DownOutlined style={{ fontSize: 12 }} />
+                          </Button>
+                        </Dropdown>
+                      </span>
+                    </Tooltip>
+                    {conversationId && (
+                      <Tag
+                        style={{
+                          alignItems: 'center',
+                          borderRadius: 8,
+                          display: 'inline-flex',
+                          fontSize: 14,
+                          height: 40,
+                          marginInlineEnd: 0,
+                          paddingInline: 12,
+                        }}
+                      >
+                        Conversation #{conversationId}
+                      </Tag>
+                    )}
+                  </Space>
+                </div>
+              )}
+              suffix={(originNode) => (
+                <div
+                  style={{
+                    alignItems: 'flex-end',
+                    display: 'flex',
+                    height: '100%',
+                    paddingBottom: 2,
+                  }}
+                >
+                  {originNode}
+                </div>
+              )}
+              styles={{
+                root: {
+                  borderColor: '#d9d9d9',
+                  borderRadius: 16,
+                  boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
+                },
+                content: {
+                  alignItems: 'stretch',
+                  padding: '16px 14px 6px 16px',
+                },
+                input: {
+                  minHeight: 76,
+                },
+                suffix: {
+                  alignItems: 'stretch',
+                },
+                footer: {
+                  padding: '0 14px 14px 16px',
+                },
+              }}
+              onChange={(value) => setDraftMessage(value)}
+              onSubmit={handleSend}
+            />
+          </div>
         </div>
       </Col>
     </Row>

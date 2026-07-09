@@ -59,6 +59,7 @@
   "dependencies": {
     "@ant-design/icons": "6.3.2",
     "@ant-design/pro-components": "3.1.14-2",
+    "@ant-design/x": "2.8.0",
     "@antv/dom-util": "^2.0.4",
     "@antv/g6": "^4.8.23",
     "@antv/g6-core": "^0.8.23",
