@@ -21,13 +21,20 @@ import com.tencent.supersonic.chat.server.service.MemoryService;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.api.pojo.response.QueryState;
+import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapEventReq;
+import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapFailureType;
+import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -41,6 +48,11 @@ public class ChatManageServiceImpl implements ChatManageService {
     private ChatQueryRepository chatQueryRepository;
     @Autowired
     private MemoryService memoryService;
+    @Autowired
+    private SemanticGapService semanticGapService;
+    @Autowired
+    @Qualifier("semanticGapCaptureExecutor")
+    private ThreadPoolExecutor semanticGapCaptureExecutor;
 
     @Override
     public Long addChat(User user, String chatName, Integer agentId) {
@@ -89,7 +101,9 @@ public class ChatManageServiceImpl implements ChatManageService {
             });
         }
 
-        return chatRepository.updateFeedback(intelligentQueryDO);
+        boolean updated = chatRepository.updateFeedback(intelligentQueryDO);
+        captureNegativeFeedbackGap(id, score, feedback, updated);
+        return updated;
     }
 
     @Override
@@ -189,6 +203,89 @@ public class ChatManageServiceImpl implements ChatManageService {
                     .collect(Collectors.toList());
             queryResp.setParseInfos(parseInfos);
         }
+    }
+
+    /** 用户负反馈是语义缺口的重要来源；只在反馈更新成功且分数明确较低时提交后台采集任务。 */
+    private void captureNegativeFeedbackGap(Long queryId, Integer score, String feedback,
+            boolean updated) {
+        if (!updated || score == null || score > 1) {
+            return;
+        }
+        try {
+            semanticGapCaptureExecutor.execute(
+                    () -> captureNegativeFeedbackGapSafely(queryId, score, feedback));
+        } catch (RejectedExecutionException e) {
+            log.warn("semantic gap capture queue is full, drop feedback event for queryId {}",
+                    queryId, e);
+        }
+    }
+
+    /** 后台组装并写入负反馈缺口，异常只记录日志，避免反馈接口被治理链路反向打失败。 */
+    private void captureNegativeFeedbackGapSafely(Long queryId, Integer score, String feedback) {
+        try {
+            QueryResp queryResp = getChatQuery(queryId);
+            if (queryResp == null) {
+                log.warn("skip negative feedback semantic gap because query is missing, queryId {}",
+                        queryId);
+                return;
+            }
+            SemanticGapEventReq eventReq = buildNegativeFeedbackGapEvent(queryResp, score, feedback);
+            semanticGapService.capture(eventReq);
+        } catch (Exception e) {
+            log.warn("failed to capture negative feedback semantic gap for queryId {}", queryId, e);
+        }
+    }
+
+    /** 组装负反馈事件并按反馈内容细分失败类型。 */
+    private SemanticGapEventReq buildNegativeFeedbackGapEvent(QueryResp queryResp, Integer score,
+            String feedback) {
+        SemanticGapEventReq eventReq = new SemanticGapEventReq();
+        eventReq.setQuestion(queryResp.getQueryText());
+        eventReq.setQueryId(queryResp.getQuestionId());
+        eventReq.setChatId(queryResp.getChatId());
+        eventReq.setAssistantId(queryResp.getAgentId());
+        eventReq.setFailureType(classifyNegativeFeedback(queryResp, feedback));
+        eventReq.setFailureReason("user negative feedback score: " + score);
+        eventReq.setFeedback(feedback);
+        if (queryResp.getQueryResult() != null) {
+            eventReq.setGeneratedSql(queryResp.getQueryResult().getQuerySql());
+            if (queryResp.getQueryResult().getChatContext() != null
+                    && queryResp.getQueryResult().getChatContext().getSqlInfo() != null) {
+                eventReq.setS2sql(queryResp.getQueryResult().getChatContext().getSqlInfo()
+                        .getCorrectedS2SQL());
+            }
+        }
+        return eventReq;
+    }
+
+    /** 根据反馈关键词和结果上下文把低分反馈归入更具体的语义缺口类型。 */
+    private SemanticGapFailureType classifyNegativeFeedback(QueryResp queryResp, String feedback) {
+        if (containsAny(feedback, "模型", "主题域", "数据集", "数据源", "表", "口径不对",
+                "字段不对", "选错", "匹配错", "不是这个")) {
+            return SemanticGapFailureType.WRONG_MODEL_MATCHED;
+        }
+        if (isSuccessfulEmptyResult(queryResp)
+                && containsAny(feedback, "应该有", "为空", "没数据", "无数据", "没有数据",
+                        "查不到", "没查到", "空结果", "结果为空")) {
+            return SemanticGapFailureType.EMPTY_RESULT_SUSPECTED;
+        }
+        return SemanticGapFailureType.USER_NEGATIVE_FEEDBACK;
+    }
+
+    /** 判断问答结果是否成功返回但没有结构化数据。 */
+    private boolean isSuccessfulEmptyResult(QueryResp queryResp) {
+        QueryResult queryResult = queryResp == null ? null : queryResp.getQueryResult();
+        return queryResult != null && QueryState.SUCCESS.equals(queryResult.getQueryState())
+                && queryResult.getResponse() == null
+                && CollectionUtils.isEmpty(queryResult.getQueryResults());
+    }
+
+    /** 判断文本是否包含任一关键词；空反馈直接返回 false。 */
+    private boolean containsAny(String text, String... keywords) {
+        if (text == null || keywords == null) {
+            return false;
+        }
+        return Arrays.stream(keywords).anyMatch(text::contains);
     }
 
     @Override

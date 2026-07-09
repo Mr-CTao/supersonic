@@ -1,0 +1,61 @@
+/**
+ * 语义缺口池页面样式。
+ *
+ * 职责：
+ * - 固定表格卡片的主要可视高度；
+ * - 让分页组件在数据较少时仍停靠在表格区域右下角；
+ * - 仅作用于语义缺口池页面，避免影响其他 ProTable。
+ */
+.semanticGapTable {
+  :global {
+    .ant-pro-card-body {
+      display: flex;
+      height: calc(100vh - 240px);
+      min-height: 420px;
+      max-height: 680px;
+      flex-direction: column;
+    }
+
+    .ant-table-wrapper,
+    .ant-spin,
+    .ant-spin-nested-loading,
+    .ant-spin-container {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .ant-table {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      margin-bottom: 5px;
+      flex-direction: column;
+    }
+
+    .ant-table-container {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .ant-table-content {
+      flex: 1;
+      min-height: 0;
+      overflow: auto !important;
+    }
+
+    .ant-table-body {
+      flex: 1;
+      max-height: none !important;
+      overflow-y: auto !important;
+    }
+
+    .ant-table-pagination.ant-pagination {
+      margin-top: 0;
+      margin-bottom: 0;
+    }
+  }
+}

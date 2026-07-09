@@ -498,3 +498,39 @@ CREATE TABLE IF NOT EXISTS `s2_llm_invocation_log` (
     PRIMARY KEY (`id`),
     KEY `idx_llm_invocation_conversation` (`conversation_id`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='LLM 调用日志表';
+
+--20260709 AI semantic modeling phase 2: semantic gap pool
+CREATE TABLE IF NOT EXISTS `s2_semantic_gap` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '语义缺口ID',
+    `question` text NOT NULL COMMENT '原始问题，已做基础脱敏',
+    `normalized_question` varchar(500) NOT NULL COMMENT '归一化问题，用于轻量聚合',
+    `assistant_id` int DEFAULT NULL COMMENT '关联助理ID',
+    `user_id` bigint DEFAULT NULL COMMENT '提问用户ID',
+    `domain_id` bigint DEFAULT NULL COMMENT '可能所属主题域ID',
+    `data_source_id` bigint DEFAULT NULL COMMENT '可能关联数据源ID',
+    `failure_type` varchar(64) NOT NULL COMMENT '失败类型',
+    `failure_reason` varchar(1500) DEFAULT NULL COMMENT '失败原因摘要',
+    `matched_model_ids` varchar(1000) DEFAULT NULL COMMENT '命中模型ID列表',
+    `matched_metric_ids` varchar(1000) DEFAULT NULL COMMENT '命中指标ID列表',
+    `matched_dimension_ids` varchar(1000) DEFAULT NULL COMMENT '命中维度ID列表',
+    `generated_sql` mediumtext DEFAULT NULL COMMENT '失败时生成SQL，已脱敏截断',
+    `s2sql` mediumtext DEFAULT NULL COMMENT '失败时S2SQL，已脱敏截断',
+    `feedback` varchar(1500) DEFAULT NULL COMMENT '用户反馈摘要',
+    `occurrence_count` int NOT NULL DEFAULT 1 COMMENT '出现次数',
+    `negative_feedback_count` int NOT NULL DEFAULT 0 COMMENT '负反馈次数',
+    `priority_score` int NOT NULL DEFAULT 0 COMMENT '优先级分数',
+    `status` varchar(64) NOT NULL COMMENT '处理状态',
+    `created_at` datetime NOT NULL COMMENT '首次出现时间',
+    `last_seen_at` datetime NOT NULL COMMENT '最近出现时间',
+    `created_by` varchar(100) DEFAULT NULL COMMENT '创建人或系统标识',
+    `updated_at` datetime NOT NULL COMMENT '更新时间',
+    `updated_by` varchar(100) DEFAULT NULL COMMENT '更新人',
+    `ignore_reason` varchar(1500) DEFAULT NULL COMMENT '忽略原因',
+    `source_query_id` bigint DEFAULT NULL COMMENT '最近来源问答ID',
+    `source_chat_id` bigint DEFAULT NULL COMMENT '最近来源会话ID',
+    `recent_questions` text DEFAULT NULL COMMENT '最近相似问法',
+    PRIMARY KEY (`id`),
+    KEY `idx_semantic_gap_pool` (`assistant_id`, `domain_id`, `failure_type`, `status`),
+    KEY `idx_semantic_gap_priority` (`priority_score`, `last_seen_at`),
+    KEY `idx_semantic_gap_normalized` (`normalized_question`(191))
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI语义建模语义缺口池';

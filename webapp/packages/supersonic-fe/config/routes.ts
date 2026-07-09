@@ -252,6 +252,24 @@ const ROUTES = [
     envEnableList: [ENV_KEY.SEMANTIC],
   },
   {
+    path: '/ai-semantic-modeling',
+    name: 'aiSemanticModeling',
+    component: './AISemanticModeling',
+    envEnableList: [ENV_KEY.SEMANTIC],
+    routes: [
+      {
+        path: '/ai-semantic-modeling',
+        redirect: '/ai-semantic-modeling/gaps',
+      },
+      {
+        path: '/ai-semantic-modeling/gaps',
+        name: 'semanticGapPool',
+        component: './AISemanticModeling/SemanticGapPool',
+        envEnableList: [ENV_KEY.SEMANTIC],
+      },
+    ],
+  },
+  {
     path: '/system',
     name: 'system',
     component: './System',

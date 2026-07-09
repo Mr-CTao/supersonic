@@ -47,6 +47,10 @@ import com.tencent.supersonic.headless.chat.query.SemanticQuery;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
+import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapEventReq;
+import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapFailureType;
+import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapPropertyKeys;
+import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapService;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.LongValue;
@@ -78,6 +82,8 @@ import java.util.stream.Collectors;
 @Service
 public class ChatQueryServiceImpl implements ChatQueryService {
 
+    private static final double LOW_CONFIDENCE_SCORE_THRESHOLD = 10.0D;
+
     @Autowired
     private ChatManageService chatManageService;
     @Autowired
@@ -87,6 +93,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     @Autowired
     @Lazy
     private AgentService agentService;
+    @Autowired
+    private SemanticGapService semanticGapService;
 
     private final List<ChatQueryParser> chatQueryParsers = ComponentFactory.getChatParsers();
     private final List<ChatQueryExecutor> chatQueryExecutors = ComponentFactory.getChatExecutors();
@@ -117,7 +125,12 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         ParseContext parseContext = buildParseContext(chatParseReq, new ChatParseResp(queryId));
         for (ChatQueryParser parser : chatQueryParsers) {
             if (parser.accept(parseContext)) {
-                parser.parse(parseContext);
+                try {
+                    parser.parse(parseContext);
+                } catch (RuntimeException e) {
+                    captureParserExceptionGap(chatParseReq, parser, e);
+                    throw e;
+                }
             }
         }
 
@@ -134,6 +147,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
             chatManageService.updateParseCostTime(parseContext.getResponse());
         }
 
+        captureNoSelectedParseGap(chatParseReq, parseContext);
+        captureLowConfidenceGap(chatParseReq, parseContext);
         return parseContext.getResponse();
     }
 
@@ -141,13 +156,18 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     public QueryResult execute(ChatExecuteReq chatExecuteReq) {
         QueryResult queryResult = new QueryResult();
         ExecuteContext executeContext = buildExecuteContext(chatExecuteReq);
-        for (ChatQueryExecutor chatQueryExecutor : chatQueryExecutors) {
-            if (chatQueryExecutor.accept(executeContext)) {
-                queryResult = chatQueryExecutor.execute(executeContext);
-                if (queryResult != null) {
-                    break;
+        try {
+            for (ChatQueryExecutor chatQueryExecutor : chatQueryExecutors) {
+                if (chatQueryExecutor.accept(executeContext)) {
+                    queryResult = chatQueryExecutor.execute(executeContext);
+                    if (queryResult != null) {
+                        break;
+                    }
                 }
             }
+        } catch (RuntimeException e) {
+            captureExecutionExceptionGap(chatExecuteReq, executeContext.getParseInfo(), e);
+            throw e;
         }
 
         executeContext.setResponse(queryResult);
@@ -158,6 +178,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                 }
             }
             saveQueryResult(chatExecuteReq, queryResult);
+            captureExecutionResultGap(chatExecuteReq, executeContext.getParseInfo(), queryResult);
+            captureFallbackToLlmSqlGap(chatExecuteReq, executeContext.getParseInfo());
         }
 
         return queryResult;
@@ -227,13 +249,18 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         SemanticQuery semanticQuery = QueryManager.createQuery(parseInfo.getQueryMode());
         semanticQuery.setParseInfo(parseInfo);
 
-        if (LLMSqlQuery.QUERY_MODE.equalsIgnoreCase(parseInfo.getQueryMode())) {
-            handleLLMQueryMode(chatQueryDataReq, semanticQuery, dataSetSchema, user);
-        } else {
-            handleRuleQueryMode(semanticQuery, dataSetSchema, user);
-        }
+        try {
+            if (LLMSqlQuery.QUERY_MODE.equalsIgnoreCase(parseInfo.getQueryMode())) {
+                handleLLMQueryMode(chatQueryDataReq, semanticQuery, dataSetSchema, user);
+            } else {
+                handleRuleQueryMode(semanticQuery, dataSetSchema, user);
+            }
 
-        return executeQuery(semanticQuery, user);
+            return executeQuery(semanticQuery, user);
+        } catch (Exception e) {
+            captureQueryDataExceptionGap(chatQueryDataReq, parseInfo, user, e);
+            throw e;
+        }
     }
 
     private List<String> getFieldsFromSql(SemanticParseInfo parseInfo) {
@@ -577,5 +604,197 @@ public class ChatQueryServiceImpl implements ChatQueryService {
             return;
         }
         chatManageService.saveQueryResult(chatExecuteReq, queryResult);
+    }
+
+    /** 捕获解析后没有 selectedParses 的缺口，放在 service 层以覆盖 parse 和 query 两种调用方式。 */
+    private void captureNoSelectedParseGap(ChatParseReq chatParseReq, ParseContext parseContext) {
+        if (parseContext.needFeedback()
+                || !CollectionUtils.isEmpty(parseContext.getResponse().getSelectedParses())) {
+            return;
+        }
+        SemanticGapEventReq eventReq = buildBaseGapEvent(chatParseReq.getQueryText(),
+                chatParseReq.getQueryId(), chatParseReq.getChatId(), chatParseReq.getAgentId(),
+                chatParseReq.getUser());
+        eventReq.setFailureType(SemanticGapFailureType.NO_SELECTED_PARSE);
+        eventReq.setFailureReason("parser error,no selectedParses");
+        captureGapSafely(eventReq);
+    }
+
+    /** 捕获 parser 循环中的运行时异常；采集后继续抛出，保持原 API 异常语义。 */
+    private void captureParserExceptionGap(ChatParseReq chatParseReq, ChatQueryParser parser,
+            RuntimeException exception) {
+        SemanticGapEventReq eventReq = buildBaseGapEvent(chatParseReq.getQueryText(),
+                chatParseReq.getQueryId(), chatParseReq.getChatId(), chatParseReq.getAgentId(),
+                chatParseReq.getUser());
+        eventReq.setFailureType(SemanticGapFailureType.PARSER_EXCEPTION);
+        eventReq.setFailureReason(String.format("%s: %s", parser.getClass().getSimpleName(),
+                StringUtils.defaultIfBlank(exception.getMessage(), exception.getClass().getSimpleName())));
+        captureGapSafely(eventReq);
+    }
+
+    /** 捕获规则解析候选置信度偏低的信号，不影响后续执行或候选展示。 */
+    private void captureLowConfidenceGap(ChatParseReq chatParseReq, ParseContext parseContext) {
+        if (parseContext.needFeedback()
+                || CollectionUtils.isEmpty(parseContext.getResponse().getSelectedParses())) {
+            return;
+        }
+        SemanticParseInfo topParse = parseContext.getResponse().getSelectedParses().get(0);
+        if (topParse == null || LLMSqlQuery.QUERY_MODE.equalsIgnoreCase(topParse.getQueryMode())
+                || topParse.getScore() >= LOW_CONFIDENCE_SCORE_THRESHOLD) {
+            return;
+        }
+        SemanticGapEventReq eventReq = buildBaseGapEvent(chatParseReq.getQueryText(),
+                chatParseReq.getQueryId(), chatParseReq.getChatId(), chatParseReq.getAgentId(),
+                chatParseReq.getUser());
+        fillParseDiagnostics(eventReq, topParse);
+        eventReq.setFailureType(SemanticGapFailureType.LOW_CONFIDENCE);
+        eventReq.setFailureReason(String.format("highest parse score %.2f is below %.2f",
+                topParse.getScore(), LOW_CONFIDENCE_SCORE_THRESHOLD));
+        captureGapSafely(eventReq);
+    }
+
+    /** 捕获 execute 接口中 SQL 或语义执行抛出的异常，同时保持原异常继续向上抛出。 */
+    private void captureExecutionExceptionGap(ChatExecuteReq chatExecuteReq,
+            SemanticParseInfo parseInfo, RuntimeException exception) {
+        SemanticGapEventReq eventReq = buildBaseGapEvent(chatExecuteReq.getQueryText(),
+                chatExecuteReq.getQueryId(), chatExecuteReq.getChatId(), chatExecuteReq.getAgentId(),
+                chatExecuteReq.getUser());
+        fillParseDiagnostics(eventReq, parseInfo);
+        eventReq.setFailureType(SemanticGapFailureType.SQL_EXECUTION_ERROR);
+        eventReq.setFailureReason(exception.getMessage());
+        captureGapSafely(eventReq);
+    }
+
+    /** 捕获执行返回非 SUCCESS 的缺口，避免只有抛异常的失败才进入缺口池。 */
+    private void captureExecutionResultGap(ChatExecuteReq chatExecuteReq, SemanticParseInfo parseInfo,
+            QueryResult queryResult) {
+        if (QueryState.SUCCESS.equals(queryResult.getQueryState())) {
+            return;
+        }
+        SemanticGapEventReq eventReq = buildBaseGapEvent(chatExecuteReq.getQueryText(),
+                chatExecuteReq.getQueryId(), chatExecuteReq.getChatId(), chatExecuteReq.getAgentId(),
+                chatExecuteReq.getUser());
+        fillParseDiagnostics(eventReq, parseInfo);
+        eventReq.setGeneratedSql(queryResult.getQuerySql());
+        eventReq.setFailureType(SemanticGapFailureType.SQL_EXECUTION_ERROR);
+        eventReq.setFailureReason(StringUtils.defaultIfBlank(queryResult.getErrorMsg(),
+                String.format("query state is %s", queryResult.getQueryState())));
+        captureGapSafely(eventReq);
+    }
+
+    /** 捕获 queryData 分步查询中的语义 SQL 执行异常。 */
+    private void captureQueryDataExceptionGap(ChatQueryDataReq chatQueryDataReq,
+            SemanticParseInfo parseInfo, User user, Exception exception) {
+        SemanticGapEventReq eventReq = buildBaseGapEvent(null, chatQueryDataReq.getQueryId(), null,
+                null, user);
+        fillParseDiagnostics(eventReq, parseInfo);
+        if (StringUtils.isBlank(eventReq.getQuestion())) {
+            eventReq.setQuestion(parseInfo == null ? "queryId:" + chatQueryDataReq.getQueryId()
+                    : parseInfo.getTextInfo());
+        }
+        if (StringUtils.isBlank(eventReq.getQuestion())) {
+            eventReq.setQuestion("queryId:" + chatQueryDataReq.getQueryId());
+        }
+        eventReq.setFailureType(SemanticGapFailureType.SQL_EXECUTION_ERROR);
+        eventReq.setFailureReason(exception.getMessage());
+        captureGapSafely(eventReq);
+    }
+
+    /** 捕获回退到 LLM SQL 模式的信号，阶段 2 只沉淀缺口，不触碰 LLM Gateway。 */
+    private void captureFallbackToLlmSqlGap(ChatExecuteReq chatExecuteReq, SemanticParseInfo parseInfo) {
+        if (!isSemanticGapFallbackParse(parseInfo)) {
+            return;
+        }
+        SemanticGapEventReq eventReq = buildBaseGapEvent(chatExecuteReq.getQueryText(),
+                chatExecuteReq.getQueryId(), chatExecuteReq.getChatId(), chatExecuteReq.getAgentId(),
+                chatExecuteReq.getUser());
+        fillParseDiagnostics(eventReq, parseInfo);
+        eventReq.setFailureType(SemanticGapFailureType.FALLBACK_TO_LLM_SQL);
+        Object reason = parseInfo.getProperties().get(SemanticGapPropertyKeys.FALLBACK_REASON);
+        eventReq.setFailureReason(StringUtils.defaultIfBlank(reason == null ? null : String.valueOf(reason),
+                "query selected semantic gap fallback LLM SQL mode"));
+        captureGapSafely(eventReq);
+    }
+
+    /** 判断 parseInfo 是否来自语义缺口定义的真实 fallback，而不是普通 LLM_S2SQL。 */
+    private boolean isSemanticGapFallbackParse(SemanticParseInfo parseInfo) {
+        if (parseInfo == null || !LLMSqlQuery.QUERY_MODE.equalsIgnoreCase(parseInfo.getQueryMode())
+                || parseInfo.getProperties() == null) {
+            return false;
+        }
+        Object fallback = parseInfo.getProperties().get(SemanticGapPropertyKeys.FALLBACK);
+        return Boolean.TRUE.equals(fallback) || Boolean.parseBoolean(String.valueOf(fallback));
+    }
+
+    /** 构造缺口采集基础事件，统一处理用户、会话和问题上下文。 */
+    private SemanticGapEventReq buildBaseGapEvent(String question, Long queryId, Integer chatId,
+            Integer agentId, User user) {
+        SemanticGapEventReq eventReq = new SemanticGapEventReq();
+        eventReq.setQuestion(question);
+        eventReq.setQueryId(queryId);
+        eventReq.setChatId(chatId == null ? null : chatId.longValue());
+        eventReq.setAssistantId(agentId);
+        if (user != null) {
+            eventReq.setUserId(user.getId());
+            eventReq.setUserName(user.getName());
+        }
+        return eventReq;
+    }
+
+    /** 从语义解析结果提取模型、指标、维度、SQL 和 S2SQL 诊断上下文。 */
+    private void fillParseDiagnostics(SemanticGapEventReq eventReq, SemanticParseInfo parseInfo) {
+        if (parseInfo == null) {
+            return;
+        }
+        if (StringUtils.isBlank(eventReq.getQuestion())) {
+            eventReq.setQuestion(parseInfo.getTextInfo());
+        }
+        if (parseInfo.getSqlInfo() != null) {
+            eventReq.setGeneratedSql(StringUtils.defaultIfBlank(parseInfo.getSqlInfo().getQuerySQL(),
+                    parseInfo.getSqlInfo().getCorrectedQuerySQL()));
+            eventReq.setS2sql(StringUtils.defaultIfBlank(parseInfo.getSqlInfo().getCorrectedS2SQL(),
+                    parseInfo.getSqlInfo().getParsedS2SQL()));
+        }
+        eventReq.setMatchedMetricIds(joinSchemaElementIds(parseInfo.getMetrics()));
+        eventReq.setMatchedDimensionIds(joinSchemaElementIds(parseInfo.getDimensions()));
+        eventReq.setMatchedModelIds(joinMatchedModelIds(parseInfo));
+    }
+
+    /** 拼接 SchemaElement ID，前端用于诊断展示，不在这里反查名称以避免 N+1 查询。 */
+    private String joinSchemaElementIds(Set<SchemaElement> elements) {
+        if (CollectionUtils.isEmpty(elements)) {
+            return null;
+        }
+        return elements.stream().map(SchemaElement::getId).filter(Objects::nonNull)
+                .map(String::valueOf).collect(Collectors.joining(","));
+    }
+
+    /** 拼接模型 ID；当元素缺少 model 时退化为 dataSetId，保留第一版可用诊断线索。 */
+    private String joinMatchedModelIds(SemanticParseInfo parseInfo) {
+        Set<Long> modelIds = new HashSet<>();
+        if (parseInfo.getDataSet() != null && parseInfo.getDataSet().getModel() != null) {
+            modelIds.add(parseInfo.getDataSet().getModel());
+        }
+        if (!CollectionUtils.isEmpty(parseInfo.getMetrics())) {
+            parseInfo.getMetrics().stream().map(SchemaElement::getModel)
+                    .filter(Objects::nonNull).forEach(modelIds::add);
+        }
+        if (!CollectionUtils.isEmpty(parseInfo.getDimensions())) {
+            parseInfo.getDimensions().stream().map(SchemaElement::getModel)
+                    .filter(Objects::nonNull).forEach(modelIds::add);
+        }
+        if (CollectionUtils.isEmpty(modelIds) && parseInfo.getDataSetId() != null) {
+            modelIds.add(parseInfo.getDataSetId());
+        }
+        return modelIds.stream().map(String::valueOf).collect(Collectors.joining(","));
+    }
+
+    /** 缺口采集不能拖慢或阻断问答主链路，因此异常只记日志。 */
+    private void captureGapSafely(SemanticGapEventReq eventReq) {
+        try {
+            semanticGapService.captureAsync(eventReq);
+        } catch (Exception e) {
+            log.warn("failed to capture semantic gap for queryId {}", eventReq.getQueryId(), e);
+        }
     }
 }

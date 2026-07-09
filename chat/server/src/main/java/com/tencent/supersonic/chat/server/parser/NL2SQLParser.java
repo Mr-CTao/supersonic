@@ -24,6 +24,7 @@ import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
+import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapPropertyKeys;
 import com.tencent.supersonic.headless.server.utils.ModelConfigHelper;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -54,6 +55,8 @@ public class NL2SQLParser implements ChatQueryParser {
     private static final Logger keyPipelineLog = LoggerFactory.getLogger("keyPipeline");
 
     public static final String APP_KEY_MULTI_TURN = "REWRITE_MULTI_TURN";
+    private static final String SEMANTIC_GAP_FALLBACK_REASON =
+            "llm parse failed, retry with MapModeEnum.ALL succeeded";
     private static final String REWRITE_MULTI_TURN_INSTRUCTION = ""
             + "#Role: You are a data product manager experienced in data requirements."
             + "#Task: Your will be provided with current and history questions asked by a user,"
@@ -151,6 +154,7 @@ public class NL2SQLParser implements ChatQueryParser {
                 queryNLReq.setSelectedParseInfo(null);
                 queryNLReq.setMapModeEnum(MapModeEnum.ALL);
                 doParse(queryNLReq, parseContext.getResponse());
+                markSemanticGapFallback(parseContext.getResponse(), SEMANTIC_GAP_FALLBACK_REASON);
             }
         }
     }
@@ -164,6 +168,29 @@ public class NL2SQLParser implements ChatQueryParser {
         resp.setState(parseResp.getState());
         resp.setParseTimeCost(parseResp.getParseTimeCost());
         resp.setErrorMsg(parseResp.getErrorMsg());
+    }
+
+    /**
+     * 标记真实 fallback 产生的 LLM 解析结果。
+     *
+     * @param response 重试后的解析响应。
+     * @param reason fallback 原因。
+     *
+     * <p>设计取舍：只在首轮 LLM 失败且 ALL 模式重试成功后打标，避免把正常 LLM_S2SQL 查询误归因为 fallback。
+     * parseInfo.properties 是单次解析结果的上下文扩展字段，当前方法只在线程内写入，不涉及共享状态。</p>
+     */
+    private void markSemanticGapFallback(ChatParseResp response, String reason) {
+        if (!ParseResp.ParseState.COMPLETED.equals(response.getState())
+                || response.getSelectedParses().isEmpty()) {
+            return;
+        }
+        for (SemanticParseInfo parseInfo : response.getSelectedParses()) {
+            if (parseInfo.getProperties() == null) {
+                parseInfo.setProperties(new HashMap<>());
+            }
+            parseInfo.getProperties().put(SemanticGapPropertyKeys.FALLBACK, true);
+            parseInfo.getProperties().put(SemanticGapPropertyKeys.FALLBACK_REASON, reason);
+        }
     }
 
     private void rewriteMultiTurn(ParseContext parseContext, QueryNLReq queryNLReq) {

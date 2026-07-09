@@ -42,6 +42,40 @@ CREATE TABLE IF NOT EXISTS `s2_chat_query`
     PRIMARY KEY (`question_id`)
 );
 
+CREATE TABLE IF NOT EXISTS `s2_semantic_gap`
+(
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `question` CLOB NOT NULL,
+    `normalized_question` varchar(500) NOT NULL,
+    `assistant_id` INT DEFAULT NULL,
+    `user_id` BIGINT DEFAULT NULL,
+    `domain_id` BIGINT DEFAULT NULL,
+    `data_source_id` BIGINT DEFAULT NULL,
+    `failure_type` varchar(64) NOT NULL,
+    `failure_reason` varchar(1500) DEFAULT NULL,
+    `matched_model_ids` varchar(1000) DEFAULT NULL,
+    `matched_metric_ids` varchar(1000) DEFAULT NULL,
+    `matched_dimension_ids` varchar(1000) DEFAULT NULL,
+    `generated_sql` CLOB DEFAULT NULL,
+    `s2sql` CLOB DEFAULT NULL,
+    `feedback` varchar(1500) DEFAULT NULL,
+    `occurrence_count` INT NOT NULL DEFAULT 1,
+    `negative_feedback_count` INT NOT NULL DEFAULT 0,
+    `priority_score` INT NOT NULL DEFAULT 0,
+    `status` varchar(64) NOT NULL,
+    `created_at` TIMESTAMP NOT NULL,
+    `last_seen_at` TIMESTAMP NOT NULL,
+    `created_by` varchar(100) DEFAULT NULL,
+    `updated_at` TIMESTAMP NOT NULL,
+    `updated_by` varchar(100) DEFAULT NULL,
+    `ignore_reason` varchar(1500) DEFAULT NULL,
+    `source_query_id` BIGINT DEFAULT NULL,
+    `source_chat_id` BIGINT DEFAULT NULL,
+    `recent_questions` CLOB DEFAULT NULL,
+    PRIMARY KEY (`id`)
+);
+COMMENT ON TABLE s2_semantic_gap IS 'AI semantic modeling gap pool';
+
 CREATE TABLE IF NOT EXISTS `s2_chat_parse`
 (
     `question_id`       BIGINT  NOT NULL,

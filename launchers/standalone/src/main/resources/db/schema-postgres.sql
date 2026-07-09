@@ -126,6 +126,44 @@ CREATE TABLE IF NOT EXISTS s2_chat_query (
     parse_time_cost varchar(1024) DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS s2_semantic_gap (
+    id SERIAL PRIMARY KEY,
+    question text NOT NULL,
+    normalized_question varchar(500) NOT NULL,
+    assistant_id integer DEFAULT NULL,
+    user_id bigint DEFAULT NULL,
+    domain_id bigint DEFAULT NULL,
+    data_source_id bigint DEFAULT NULL,
+    failure_type varchar(64) NOT NULL,
+    failure_reason varchar(1500) DEFAULT NULL,
+    matched_model_ids varchar(1000) DEFAULT NULL,
+    matched_metric_ids varchar(1000) DEFAULT NULL,
+    matched_dimension_ids varchar(1000) DEFAULT NULL,
+    generated_sql text DEFAULT NULL,
+    s2sql text DEFAULT NULL,
+    feedback varchar(1500) DEFAULT NULL,
+    occurrence_count integer NOT NULL DEFAULT 1,
+    negative_feedback_count integer NOT NULL DEFAULT 0,
+    priority_score integer NOT NULL DEFAULT 0,
+    status varchar(64) NOT NULL,
+    created_at timestamp NOT NULL,
+    last_seen_at timestamp NOT NULL,
+    created_by varchar(100) DEFAULT NULL,
+    updated_at timestamp NOT NULL,
+    updated_by varchar(100) DEFAULT NULL,
+    ignore_reason varchar(1500) DEFAULT NULL,
+    source_query_id bigint DEFAULT NULL,
+    source_chat_id bigint DEFAULT NULL,
+    recent_questions text DEFAULT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_semantic_gap_pool
+    ON s2_semantic_gap (assistant_id, domain_id, failure_type, status);
+CREATE INDEX IF NOT EXISTS idx_semantic_gap_priority
+    ON s2_semantic_gap (priority_score, last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_semantic_gap_normalized
+    ON s2_semantic_gap (normalized_question);
+
 CREATE TABLE IF NOT EXISTS s2_chat_statistics (
     question_id bigint NOT NULL,
     chat_id bigint NOT NULL,
