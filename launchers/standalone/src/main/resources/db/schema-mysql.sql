@@ -165,6 +165,82 @@ CREATE TABLE IF NOT EXISTS `s2_chat_model` (
     PRIMARY KEY (`id`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='对话大模型实例表';
 
+CREATE TABLE IF NOT EXISTS `s2_llm_model_capability` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `chat_model_id` bigint(20) NOT NULL COMMENT '复用 s2_chat_model.id',
+    `provider_type` varchar(64) NOT NULL COMMENT '供应商类型',
+    `model_name` varchar(255) NOT NULL COMMENT '模型名称',
+    `max_context_tokens` int DEFAULT NULL COMMENT '最大上下文 token',
+    `support_stream` tinyint DEFAULT 0 COMMENT '是否支持流式输出',
+    `support_json_mode` tinyint DEFAULT 0 COMMENT '是否支持 JSON Output',
+    `support_tool_calling` tinyint DEFAULT 0 COMMENT '是否支持 Tool Calls',
+    `support_thinking` tinyint DEFAULT 0 COMMENT '是否支持思考模式',
+    `support_chat_prefix_completion` tinyint DEFAULT 0 COMMENT '是否支持对话前缀续写 Beta',
+    `support_fim_completion` tinyint DEFAULT 0 COMMENT '是否支持 FIM /completions Beta',
+    `support_context_cache` tinyint DEFAULT 0 COMMENT '是否支持上下文硬盘缓存',
+    `support_system_prompt` tinyint DEFAULT 1 COMMENT '是否支持 system prompt',
+    `recommended_temperature` double DEFAULT NULL COMMENT '推荐温度',
+    `usage_scene` varchar(255) DEFAULT NULL COMMENT '适用场景',
+    `enabled` tinyint DEFAULT 1 COMMENT '是否启用',
+    `created_at` datetime NOT NULL COMMENT '创建时间',
+    `updated_at` datetime NOT NULL COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_llm_capability_model` (`chat_model_id`, `model_name`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='LLM 模型能力表';
+
+CREATE TABLE IF NOT EXISTS `s2_llm_conversation` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `conversation_type` varchar(64) NOT NULL COMMENT '会话类型',
+    `chat_model_id` bigint(20) NOT NULL COMMENT '复用 s2_chat_model.id',
+    `provider_type` varchar(64) NOT NULL COMMENT '供应商类型',
+    `model_name` varchar(255) NOT NULL COMMENT '模型名称',
+    `business_id` varchar(128) DEFAULT NULL COMMENT '业务对象 ID',
+    `status` varchar(32) NOT NULL COMMENT '会话状态',
+    `summary` text DEFAULT NULL COMMENT '上下文摘要预留',
+    `created_by` varchar(100) DEFAULT NULL COMMENT '创建人',
+    `created_at` datetime NOT NULL COMMENT '创建时间',
+    `updated_at` datetime NOT NULL COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_llm_conversation_business` (`conversation_type`, `business_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='LLM 本地会话表';
+
+CREATE TABLE IF NOT EXISTS `s2_llm_message` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `conversation_id` bigint(20) NOT NULL COMMENT '会话 ID',
+    `role` varchar(32) NOT NULL COMMENT 'system/user/assistant/tool',
+    `content` mediumtext DEFAULT NULL COMMENT '消息内容',
+    `reasoning_content` mediumtext DEFAULT NULL COMMENT 'DeepSeek 思考内容',
+    `content_type` varchar(32) DEFAULT NULL COMMENT 'text/json/tool_result',
+    `tool_calls` mediumtext DEFAULT NULL COMMENT 'Tool Calls 原始 JSON',
+    `tool_call_id` varchar(128) DEFAULT NULL COMMENT 'tool 消息关联 ID',
+    `token_count` int DEFAULT NULL COMMENT '估算或实际 token 数',
+    `message_order` int NOT NULL COMMENT '会话内顺序',
+    `created_at` datetime NOT NULL COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_llm_message_order` (`conversation_id`, `message_order`),
+    KEY `idx_llm_message_conversation` (`conversation_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='LLM 会话消息表';
+
+CREATE TABLE IF NOT EXISTS `s2_llm_invocation_log` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `conversation_id` bigint(20) NOT NULL COMMENT '会话 ID',
+    `chat_model_id` bigint(20) NOT NULL COMMENT '复用 s2_chat_model.id',
+    `provider_type` varchar(64) NOT NULL COMMENT '供应商类型',
+    `model_name` varchar(255) NOT NULL COMMENT '模型名称',
+    `request_id` varchar(128) DEFAULT NULL COMMENT '厂商请求 ID',
+    `prompt_tokens` int DEFAULT NULL COMMENT '输入 token',
+    `completion_tokens` int DEFAULT NULL COMMENT '输出 token',
+    `total_tokens` int DEFAULT NULL COMMENT '总 token',
+    `latency_ms` bigint DEFAULT NULL COMMENT '调用耗时',
+    `status` varchar(32) NOT NULL COMMENT '调用状态',
+    `error_code` varchar(64) DEFAULT NULL COMMENT '统一错误码',
+    `error_message` varchar(1000) DEFAULT NULL COMMENT '脱敏错误摘要',
+    `raw_response_ref` varchar(1200) DEFAULT NULL COMMENT '脱敏响应摘要',
+    `created_at` datetime NOT NULL COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_llm_invocation_conversation` (`conversation_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='LLM 调用日志表';
+
 CREATE TABLE IF NOT EXISTS `s2_database` (
                                              `id` bigint(20) NOT NULL AUTO_INCREMENT,
     `name` varchar(255) NOT NULL COMMENT '名称',

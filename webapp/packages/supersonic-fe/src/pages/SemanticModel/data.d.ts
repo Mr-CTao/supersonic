@@ -358,6 +358,33 @@ export declare namespace ISemantic {
   }
   type IDatabaseItemList = IDatabaseItem[];
 
+  interface ILlmItem {
+    id: number;
+    name: string;
+    description?: string;
+    createdBy?: string;
+    updatedBy?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    isOpen?: number;
+    config?: {
+      provider?: string;
+      baseUrl?: string;
+      betaBaseUrl?: string;
+      apiKey?: string;
+      modelName?: string;
+      temperature?: number;
+      timeOut?: number;
+      maxRetries?: number;
+      topP?: number;
+      jsonFormat?: boolean;
+      jsonFormatType?: string;
+      enableSearch?: boolean;
+      [key: string]: any;
+    };
+  }
+  type ILlmItemList = ILlmItem[];
+
   interface IDictKnowledgeConfigItemConfig {
     metricId?: number;
     blackList: string[];

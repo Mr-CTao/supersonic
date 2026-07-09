@@ -151,6 +151,84 @@ CREATE TABLE IF NOT EXISTS s2_chat_model (
     is_open smallint DEFAULT NULL
 );
 
+CREATE TABLE IF NOT EXISTS s2_llm_model_capability (
+    id SERIAL PRIMARY KEY,
+    chat_model_id integer NOT NULL,
+    provider_type varchar(64) NOT NULL,
+    model_name varchar(255) NOT NULL,
+    max_context_tokens integer DEFAULT NULL,
+    support_stream boolean DEFAULT false,
+    support_json_mode boolean DEFAULT false,
+    support_tool_calling boolean DEFAULT false,
+    support_thinking boolean DEFAULT false,
+    support_chat_prefix_completion boolean DEFAULT false,
+    support_fim_completion boolean DEFAULT false,
+    support_context_cache boolean DEFAULT false,
+    support_system_prompt boolean DEFAULT true,
+    recommended_temperature double precision DEFAULT NULL,
+    usage_scene varchar(255) DEFAULT NULL,
+    enabled boolean DEFAULT true,
+    created_at timestamp NOT NULL,
+    updated_at timestamp NOT NULL,
+    UNIQUE (chat_model_id, model_name)
+);
+
+CREATE TABLE IF NOT EXISTS s2_llm_conversation (
+    id SERIAL PRIMARY KEY,
+    conversation_type varchar(64) NOT NULL,
+    chat_model_id integer NOT NULL,
+    provider_type varchar(64) NOT NULL,
+    model_name varchar(255) NOT NULL,
+    business_id varchar(128) DEFAULT NULL,
+    status varchar(32) NOT NULL,
+    summary text DEFAULT NULL,
+    created_by varchar(100) DEFAULT NULL,
+    created_at timestamp NOT NULL,
+    updated_at timestamp NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_conversation_business
+    ON s2_llm_conversation (conversation_type, business_id);
+
+CREATE TABLE IF NOT EXISTS s2_llm_message (
+    id SERIAL PRIMARY KEY,
+    conversation_id bigint NOT NULL,
+    role varchar(32) NOT NULL,
+    content text DEFAULT NULL,
+    reasoning_content text DEFAULT NULL,
+    content_type varchar(32) DEFAULT NULL,
+    tool_calls text DEFAULT NULL,
+    tool_call_id varchar(128) DEFAULT NULL,
+    token_count integer DEFAULT NULL,
+    message_order integer NOT NULL,
+    created_at timestamp NOT NULL,
+    UNIQUE (conversation_id, message_order)
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_message_conversation
+    ON s2_llm_message (conversation_id);
+
+CREATE TABLE IF NOT EXISTS s2_llm_invocation_log (
+    id SERIAL PRIMARY KEY,
+    conversation_id bigint NOT NULL,
+    chat_model_id integer NOT NULL,
+    provider_type varchar(64) NOT NULL,
+    model_name varchar(255) NOT NULL,
+    request_id varchar(128) DEFAULT NULL,
+    prompt_tokens integer DEFAULT NULL,
+    completion_tokens integer DEFAULT NULL,
+    total_tokens integer DEFAULT NULL,
+    latency_ms bigint DEFAULT NULL,
+    status varchar(32) NOT NULL,
+    error_code varchar(64) DEFAULT NULL,
+    error_message varchar(1000) DEFAULT NULL,
+    raw_response_ref varchar(1200) DEFAULT NULL,
+    created_at timestamp NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_invocation_conversation
+    ON s2_llm_invocation_log (conversation_id);
+
 CREATE TABLE IF NOT EXISTS s2_database (
     id SERIAL PRIMARY KEY,
     name varchar(255) NOT NULL,

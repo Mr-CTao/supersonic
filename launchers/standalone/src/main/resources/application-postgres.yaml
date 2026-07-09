@@ -1,15 +1,15 @@
 spring:
   datasource:
     driver-class-name: org.postgresql.Driver
-    url: jdbc:postgresql://${S2_DB_HOST:localhost}:${S2_DB_PORT:5432}/${S2_DB_DATABASE:postgres}?stringtype=unspecified
+    url: jdbc:postgresql://${S2_DB_HOST:localhost}:${S2_DB_PORT:5432}/${S2_DB_DATABASE:supersonic}?stringtype=unspecified
     username: ${S2_DB_USER:postgres}
-    password: ${S2_DB_PASSWORD:postgres}
+    password: ${S2_DB_PASSWORD:123456}
   sql:
     init:
       continue-on-error: true
       mode: always
       username: ${S2_DB_USER:postgres}
-      password: ${S2_DB_PASSWORD:postgres}
+      password: ${S2_DB_PASSWORD:123456}
       schema-locations: classpath:db/schema-postgres.sql,classpath:db/schema-postgres-demo.sql
       data-locations: classpath:db/data-postgres.sql,classpath:db/data-postgres-demo.sql
 
@@ -20,7 +20,7 @@ s2:
       base:
         url: ${S2_DB_HOST:127.0.0.1}
       port: ${S2_DB_PORT:5432}
-      databaseName: ${S2_DB_DATABASE:postgres}
+      databaseName: ${S2_DB_DATABASE:supersonic}
       user: ${S2_DB_USER:postgres}
-      password: ${S2_DB_PASSWORD:postgres}
+      password: ${S2_DB_PASSWORD:123456}
       dimension: 512

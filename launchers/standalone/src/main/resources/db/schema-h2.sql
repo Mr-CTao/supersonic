@@ -120,6 +120,83 @@ CREATE TABLE IF NOT EXISTS `s2_chat_model`
     PRIMARY KEY (`id`)
 ); COMMENT ON TABLE s2_chat_model IS 'chat model table';
 
+CREATE TABLE IF NOT EXISTS `s2_llm_model_capability`
+(
+    id                             BIGINT AUTO_INCREMENT,
+    chat_model_id                  INT          NOT NULL,
+    provider_type                  varchar(64)  NOT NULL,
+    model_name                     varchar(255) NOT NULL,
+    max_context_tokens             INT DEFAULT NULL,
+    support_stream                 BOOLEAN DEFAULT FALSE,
+    support_json_mode              BOOLEAN DEFAULT FALSE,
+    support_tool_calling           BOOLEAN DEFAULT FALSE,
+    support_thinking               BOOLEAN DEFAULT FALSE,
+    support_chat_prefix_completion BOOLEAN DEFAULT FALSE,
+    support_fim_completion         BOOLEAN DEFAULT FALSE,
+    support_context_cache          BOOLEAN DEFAULT FALSE,
+    support_system_prompt          BOOLEAN DEFAULT TRUE,
+    recommended_temperature        DOUBLE DEFAULT NULL,
+    usage_scene                    varchar(255) DEFAULT NULL,
+    enabled                        BOOLEAN DEFAULT TRUE,
+    created_at                     TIMESTAMP NOT NULL,
+    updated_at                     TIMESTAMP NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE (`chat_model_id`, `model_name`)
+); COMMENT ON TABLE s2_llm_model_capability IS 'LLM model capability table';
+
+CREATE TABLE IF NOT EXISTS `s2_llm_conversation`
+(
+    id                BIGINT AUTO_INCREMENT,
+    conversation_type varchar(64)  NOT NULL,
+    chat_model_id     INT          NOT NULL,
+    provider_type     varchar(64)  NOT NULL,
+    model_name        varchar(255) NOT NULL,
+    business_id       varchar(128) DEFAULT NULL,
+    status            varchar(32)  NOT NULL,
+    summary           CLOB DEFAULT NULL,
+    created_by        varchar(100) DEFAULT NULL,
+    created_at        TIMESTAMP NOT NULL,
+    updated_at        TIMESTAMP NOT NULL,
+    PRIMARY KEY (`id`)
+); COMMENT ON TABLE s2_llm_conversation IS 'LLM local conversation table';
+
+CREATE TABLE IF NOT EXISTS `s2_llm_message`
+(
+    id                BIGINT AUTO_INCREMENT,
+    conversation_id   BIGINT      NOT NULL,
+    role              varchar(32) NOT NULL,
+    content           CLOB DEFAULT NULL,
+    reasoning_content CLOB DEFAULT NULL,
+    content_type      varchar(32) DEFAULT NULL,
+    tool_calls        CLOB DEFAULT NULL,
+    tool_call_id      varchar(128) DEFAULT NULL,
+    token_count       INT DEFAULT NULL,
+    message_order     INT NOT NULL,
+    created_at        TIMESTAMP NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE (`conversation_id`, `message_order`)
+); COMMENT ON TABLE s2_llm_message IS 'LLM conversation message table';
+
+CREATE TABLE IF NOT EXISTS `s2_llm_invocation_log`
+(
+    id                BIGINT AUTO_INCREMENT,
+    conversation_id   BIGINT       NOT NULL,
+    chat_model_id     INT          NOT NULL,
+    provider_type     varchar(64)  NOT NULL,
+    model_name        varchar(255) NOT NULL,
+    request_id        varchar(128) DEFAULT NULL,
+    prompt_tokens     INT DEFAULT NULL,
+    completion_tokens INT DEFAULT NULL,
+    total_tokens      INT DEFAULT NULL,
+    latency_ms        BIGINT DEFAULT NULL,
+    status            varchar(32) NOT NULL,
+    error_code        varchar(64) DEFAULT NULL,
+    error_message     varchar(1000) DEFAULT NULL,
+    raw_response_ref  varchar(1200) DEFAULT NULL,
+    created_at        TIMESTAMP NOT NULL,
+    PRIMARY KEY (`id`)
+); COMMENT ON TABLE s2_llm_invocation_log IS 'LLM invocation log table';
+
 create table IF NOT EXISTS s2_user
 (
     id       INT AUTO_INCREMENT,
