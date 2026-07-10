@@ -2,9 +2,9 @@
  * 语义缺口池前端服务封装。
  *
  * 职责：
- * - 集中管理阶段 2 语义缺口池列表、详情、忽略、重新打开和草稿占位接口；
+ * - 集中管理阶段 2 语义缺口池列表、详情、忽略和重新打开接口；
  * - 让页面组件只处理交互状态，避免 HTTP 请求散落在组件内部；
- * - 不调用 LLM Gateway，不生成 AI 草稿，不发布正式语义资产。
+ * - 草稿生成由独立 semanticModelingDraft 服务负责，本模块不发布正式语义资产。
  *
  * 并发说明：
  * - 本文件不维护共享状态，重复点击由页面 loading 状态和后端状态流转共同保护；
@@ -128,19 +128,6 @@ export function ignoreSemanticGap(id: number, reason?: string): Promise<any> {
  */
 export function reopenSemanticGap(id: number): Promise<any> {
   return request(`${SEMANTIC_GAP_BASE_URL}/${id}/reopen`, {
-    method: 'POST',
-  });
-}
-
-/**
- * 从缺口发起 AI 建模草稿。
- *
- * @param id 缺口 ID。
- * @returns 阶段 2 返回未启用提示，不会调用 LLM。
- * @throws 网络异常或请求拦截器异常。
- */
-export function createSemanticGapDraft(id: number): Promise<any> {
-  return request(`${SEMANTIC_GAP_BASE_URL}/${id}/drafts`, {
     method: 'POST',
   });
 }

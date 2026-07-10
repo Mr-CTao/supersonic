@@ -267,6 +267,107 @@ CREATE TABLE IF NOT EXISTS s2_llm_invocation_log (
 CREATE INDEX IF NOT EXISTS idx_llm_invocation_conversation
     ON s2_llm_invocation_log (conversation_id);
 
+-- AI semantic modeling phase 3: isolated structured drafts and immutable version snapshots.
+CREATE TABLE IF NOT EXISTS s2_semantic_modeling_draft (
+    id BIGSERIAL PRIMARY KEY,
+    source_type varchar(32) NOT NULL,
+    source_id bigint DEFAULT NULL,
+    title varchar(255) DEFAULT NULL,
+    business_goal text NOT NULL,
+    domain_id bigint DEFAULT NULL,
+    data_source_id bigint NOT NULL,
+    catalog_name varchar(255) DEFAULT NULL,
+    database_name varchar(255) DEFAULT NULL,
+    selected_tables text NOT NULL,
+    chat_model_id integer NOT NULL,
+    llm_conversation_id bigint DEFAULT NULL,
+    include_sample boolean NOT NULL DEFAULT false,
+    idempotency_key varchar(128) NOT NULL,
+    status varchar(32) NOT NULL,
+    current_version_no integer NOT NULL DEFAULT 0,
+    current_attempt_no integer NOT NULL DEFAULT 1,
+    lock_version integer NOT NULL DEFAULT 0,
+    generation_started_at timestamp DEFAULT NULL,
+    generation_finished_at timestamp DEFAULT NULL,
+    draft_json text DEFAULT NULL,
+    raw_output text DEFAULT NULL,
+    repaired_output text DEFAULT NULL,
+    error_code varchar(64) DEFAULT NULL,
+    error_message varchar(1500) DEFAULT NULL,
+    created_by varchar(100) NOT NULL,
+    created_at timestamp NOT NULL,
+    updated_by varchar(100) NOT NULL,
+    updated_at timestamp NOT NULL
+);
+
+COMMENT ON TABLE s2_semantic_modeling_draft IS
+    'AI semantic modeling structured draft; statuses are GENERATING, DRAFT and GENERATION_FAILED';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_semantic_draft_idempotency
+    ON s2_semantic_modeling_draft (created_by, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_semantic_draft_source
+    ON s2_semantic_modeling_draft (source_type, source_id, status);
+CREATE INDEX IF NOT EXISTS idx_semantic_draft_list
+    ON s2_semantic_modeling_draft (data_source_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_semantic_draft_generation
+    ON s2_semantic_modeling_draft (status, generation_started_at);
+
+-- Each row is an immutable generation attempt. The draft main row mirrors only the current
+-- attempt so list/detail reads stay fast while earlier failures remain available for diagnostics.
+CREATE TABLE IF NOT EXISTS s2_semantic_modeling_draft_attempt (
+    id BIGSERIAL PRIMARY KEY,
+    draft_id bigint NOT NULL,
+    attempt_no integer NOT NULL,
+    trigger_type varchar(32) NOT NULL,
+    status varchar(32) NOT NULL,
+    chat_model_id integer NOT NULL,
+    include_sample boolean NOT NULL DEFAULT false,
+    idempotency_key varchar(128) NOT NULL,
+    request_fingerprint varchar(128) DEFAULT NULL,
+    llm_conversation_id bigint DEFAULT NULL,
+    generate_request_id varchar(128) DEFAULT NULL,
+    repair_request_id varchar(128) DEFAULT NULL,
+    raw_output text DEFAULT NULL,
+    repaired_output text DEFAULT NULL,
+    failure_stage varchar(64) DEFAULT NULL,
+    validation_issues text DEFAULT NULL,
+    error_code varchar(64) DEFAULT NULL,
+    error_message varchar(1500) DEFAULT NULL,
+    started_at timestamp DEFAULT NULL,
+    finished_at timestamp DEFAULT NULL,
+    created_by varchar(100) NOT NULL,
+    created_at timestamp NOT NULL,
+    updated_by varchar(100) NOT NULL,
+    updated_at timestamp NOT NULL
+);
+
+COMMENT ON TABLE s2_semantic_modeling_draft_attempt IS
+    'Immutable generation-attempt history for AI semantic modeling drafts';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_semantic_draft_attempt_no
+    ON s2_semantic_modeling_draft_attempt (draft_id, attempt_no);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_semantic_draft_attempt_idempotency
+    ON s2_semantic_modeling_draft_attempt (created_by, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_semantic_draft_attempt_list
+    ON s2_semantic_modeling_draft_attempt (draft_id, attempt_no DESC);
+CREATE INDEX IF NOT EXISTS idx_semantic_draft_attempt_recovery
+    ON s2_semantic_modeling_draft_attempt (status, started_at);
+
+CREATE TABLE IF NOT EXISTS s2_semantic_modeling_draft_version (
+    id BIGSERIAL PRIMARY KEY,
+    draft_id bigint NOT NULL,
+    version_no integer NOT NULL,
+    draft_json text NOT NULL,
+    change_source varchar(32) NOT NULL,
+    change_summary varchar(1000) DEFAULT NULL,
+    llm_conversation_id bigint DEFAULT NULL,
+    created_by varchar(100) NOT NULL,
+    created_at timestamp NOT NULL
+);
+
+COMMENT ON TABLE s2_semantic_modeling_draft_version IS
+    'Immutable AI semantic modeling draft snapshots; change source is AI_GENERATED or MANUAL_SAVE';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_semantic_draft_version
+    ON s2_semantic_modeling_draft_version (draft_id, version_no);
+
 CREATE TABLE IF NOT EXISTS s2_database (
     id SERIAL PRIMARY KEY,
     name varchar(255) NOT NULL,

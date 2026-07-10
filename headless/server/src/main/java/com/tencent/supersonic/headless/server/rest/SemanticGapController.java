@@ -5,7 +5,6 @@ import com.tencent.supersonic.auth.api.authentication.utils.UserHolder;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticGapDO;
 import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapActionReq;
-import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapDraftResp;
 import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapQueryReq;
 import com.tencent.supersonic.headless.server.semantic.gap.SemanticGapService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,9 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 语义缺口池管理接口。
  *
- * <p>职责说明：为阶段 2 管理页面提供缺口列表、详情、忽略、重新打开和“发起草稿”占位接口。本 Controller 不调用 LLM Gateway，
- * 不生成 AI 草稿，不发布正式语义资产。并发说明：Controller 不保存可变状态；同类缺口采集和状态一致性由
- * {@link SemanticGapService} 负责。</p>
+ * <p>
+ * 职责说明：为阶段 2 缺口池提供列表、详情、忽略和重新打开。阶段 3 的草稿创建由仅暴露在认证 API 下的 {@link SemanticGapModelingDraftController}
+ * 承担，避免随本 Controller 的 OpenAPI 别名匿名暴露。 并发说明：Controller 不保存可变状态；缺口采集和状态一致性由
+ * {@link SemanticGapService} 负责。
+ * </p>
  */
 @RestController
 @RequestMapping({"/api/semantic/gaps", "/openapi/semantic/gaps"})
@@ -93,14 +94,4 @@ public class SemanticGapController {
         return semanticGapService.reopen(id, user.getName());
     }
 
-    /**
-     * 阶段 2 AI 草稿占位入口。
-     *
-     * @param id 缺口 ID。
-     * @return 未启用提示。
-     */
-    @PostMapping("/{id}/drafts")
-    public SemanticGapDraftResp createDraft(@PathVariable("id") Long id) {
-        return semanticGapService.createDraftPlaceholder(id);
-    }
 }

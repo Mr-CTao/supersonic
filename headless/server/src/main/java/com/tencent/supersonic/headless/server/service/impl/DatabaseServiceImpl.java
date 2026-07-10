@@ -37,6 +37,14 @@ import java.sql.SQLException;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * 数据源管理与查询服务实现。
+ *
+ * <p>
+ * 职责说明：封装数据源 ACL、元数据访问和 JDBC 执行。阶段 3 的样例方法只接收服务端确认的标识符， 并委托 SqlUtils 施加只读、最大行数和超时限制。并发说明：本 Service
+ * 不保存请求级可变状态；每次查询 使用独立 SqlUtils 实例。
+ * </p>
+ */
 @Slf4j
 @Service
 public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseDO>
@@ -316,7 +324,40 @@ public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseD
         return dbColumns;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>
+     * catalog 与 db 相同的数据库只保留一个限定符，避免生成重复的三段名称。表名必须先由上层 {@link #getTables(Long, String, String)}
+     * 返回并精确匹配；本方法再次复核用户 ACL。
+     * </p>
+     */
+    @Override
+    public List<Map<String, Object>> sampleRows(Long id, String catalog, String db, String table,
+            int maxRows, int timeoutSeconds, User user) throws SQLException {
+        DatabaseResp databaseResp = getDatabase(id, user);
+        List<String> identifierParts = new ArrayList<>();
+        if (StringUtils.isNotBlank(catalog) && !StringUtils.equalsIgnoreCase(catalog, db)) {
+            identifierParts.add(catalog);
+        }
+        if (StringUtils.isNotBlank(db)) {
+            identifierParts.add(db);
+        } else if (StringUtils.isNotBlank(catalog)) {
+            identifierParts.add(catalog);
+        }
+        identifierParts.add(table);
+        return sqlUtils.init(databaseResp).querySampleRows(identifierParts, maxRows,
+                timeoutSeconds);
+    }
+
     private void checkPermission(DatabaseResp databaseResp, User user) {
+        if (databaseResp == null) {
+            throw new RuntimeException("数据库不存在");
+        }
+        // 公共数据源在列表接口中被定义为具有使用权限，单条读取/草稿详情必须保持同一 ACL 语义。
+        if (databaseResp.isPublic()) {
+            return;
+        }
         List<String> admins = databaseResp.getAdmins();
         List<String> viewers = databaseResp.getViewers();
         if (!admins.contains(user.getName()) && !viewers.contains(user.getName())

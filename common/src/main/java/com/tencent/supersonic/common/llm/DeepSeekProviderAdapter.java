@@ -23,9 +23,9 @@ import java.util.Objects;
  *
  * <p>
  * 职责说明：将 Gateway 统一请求转换为 DeepSeek `/chat/completions` 非流式请求，并把响应中的
- * `content`、`reasoning_content`、`tool_calls`、usage 和错误码归一化。该实现明确区分普通 Chat Completion base URL 与
- * Beta base URL：阶段 1 的调试接口只调用普通 `/chat/completions`；对话前缀续写、FIM `/completions` 和 strict tool calling
- * 仅在能力表中记录，不在本类中混入普通对话路径。
+ * `content`、`reasoning_content`、`tool_calls`、usage 和错误码归一化。JSON mode 返回非法 JSON 时仍保留模型原文与
+ * 调用元数据，供上层在同一会话中发起结构修复。该实现明确区分普通 Chat Completion base URL 与 Beta base URL：阶段 1 的调试接口只调用普通
+ * `/chat/completions`；对话前缀续写、FIM `/completions` 和 strict tool calling 仅在能力表中记录，不在本类中混入普通对话路径。
  * </p>
  *
  * <p>
@@ -50,7 +50,11 @@ public class DeepSeekProviderAdapter implements LlmProviderAdapter {
     private static final int HTTP_INTERNAL_ERROR = 500;
     private static final int HTTP_SERVICE_UNAVAILABLE = 503;
     private static final int DEFAULT_TIMEOUT_MS = 60000;
-    private static final int RAW_RESPONSE_SUMMARY_LIMIT = 1000;
+    private static final String JSON_SCHEMA_CONTRACT_PREFIX = """
+            You must return exactly one valid JSON object that matches the JSON Schema below.
+            Do not return Markdown fences, comments, or explanatory text.
+            JSON Schema:
+            """;
 
     private final ObjectMapper objectMapper = JsonUtil.INSTANCE.getObjectMapper();
     private final HttpClient httpClient;
@@ -87,6 +91,21 @@ public class DeepSeekProviderAdapter implements LlmProviderAdapter {
         String lowerBaseUrl = StringUtils.defaultString(baseUrl).toLowerCase(Locale.ROOT);
         String lowerModelName = StringUtils.defaultString(modelName).toLowerCase(Locale.ROOT);
         return lowerBaseUrl.contains("deepseek.com") || lowerModelName.startsWith("deepseek-");
+    }
+
+    /**
+     * 声明 DeepSeek 普通 Chat Completion 使用 JSON Object 协议。
+     *
+     * <p>
+     * DeepSeek 的 {@code response_format=json_object} 只保证 JSON 合法性，不会原生执行调用方传入的
+     * JSON Schema，因此 Adapter 会在实际请求中额外注入临时 system contract，并保留服务端严格校验。
+     * </p>
+     *
+     * @return 固定返回 {@link LlmJsonOutputMode#JSON_OBJECT}。
+     */
+    @Override
+    public LlmJsonOutputMode jsonOutputMode() {
+        return LlmJsonOutputMode.JSON_OBJECT;
     }
 
     /**
@@ -201,6 +220,13 @@ public class DeepSeekProviderAdapter implements LlmProviderAdapter {
      */
     private ArrayNode buildMessages(LlmChatRequest request) {
         ArrayNode messages = objectMapper.createArrayNode();
+        if (shouldInjectJsonSchemaContract(request)) {
+            ObjectNode contractMessage = objectMapper.createObjectNode();
+            contractMessage.put("role", LlmConstants.ROLE_SYSTEM);
+            contractMessage.put("content",
+                    JSON_SCHEMA_CONTRACT_PREFIX + request.getJsonSchema().toString());
+            messages.add(contractMessage);
+        }
         for (LlmChatMessage message : request.getMessages()) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("role", message.getRole());
@@ -222,6 +248,18 @@ public class DeepSeekProviderAdapter implements LlmProviderAdapter {
             messages.add(node);
         }
         return messages;
+    }
+
+    /**
+     * 判断当前调用是否需要把 Schema 作为临时 system contract 注入 Provider 请求。
+     *
+     * <p>
+     * 注入仅发生在方法局部构造的 JSON 数组中，不修改 Gateway 传入的 messages，也不会进入会话持久化。
+     * </p>
+     */
+    private boolean shouldInjectJsonSchemaContract(LlmChatRequest request) {
+        return LlmConstants.FORMAT_JSON.equalsIgnoreCase(request.getResponseFormat())
+                && request.getJsonSchema() != null && request.getJsonSchema().isObject();
     }
 
     /**
@@ -255,24 +293,36 @@ public class DeepSeekProviderAdapter implements LlmProviderAdapter {
                 message.path("tool_calls").isMissingNode() || message.path("tool_calls").isNull()
                         ? null
                         : objectMapper.writeValueAsString(message.path("tool_calls"));
+        String reasoningContent = message.path("reasoning_content").isMissingNode()
+                || message.path("reasoning_content").isNull() ? null
+                        : message.path("reasoning_content").asText();
+        String finishReason = choice.path("finish_reason").asText(null);
+        String providerRequestId = root.path("id").asText(null);
+        JsonNode usage = root.path("usage");
         JsonNode parsedJson = null;
         if (LlmConstants.FORMAT_JSON.equalsIgnoreCase(request.getResponseFormat())) {
             parsedJson = parseJsonContent(content);
             if (parsedJson == null) {
-                return LlmChatResponse.builder().success(false)
+                // 模型原文是下一轮修复的必要上下文，解析失败不能把它与 usage 一并丢弃。
+                return LlmChatResponse.builder().success(false).content(content)
+                        .reasoningContent(reasoningContent).toolCalls(toolCalls)
+                        .finishReason(finishReason).providerRequestId(providerRequestId)
                         .errorCode(LlmConstants.ERROR_JSON_PARSE_FAILED)
                         .errorMessage("DeepSeek returned empty or invalid JSON content")
-                        .rawResponseRef(summarize(responseBody)).build();
+                        // 调用日志只保留定位信息；无效正文经内部字段传递，不能出现在日志详情。
+                        .rawResponseRef(buildSafeResponseReference(providerRequestId, finishReason,
+                                content))
+                        .promptTokens(readInteger(usage, "prompt_tokens"))
+                        .completionTokens(readInteger(usage, "completion_tokens"))
+                        .totalTokens(readInteger(usage, "total_tokens")).build();
             }
         }
-        JsonNode usage = root.path("usage");
         return LlmChatResponse.builder().success(true).content(content).parsedJson(parsedJson)
-                .reasoningContent(message.path("reasoning_content").isMissingNode()
-                        || message.path("reasoning_content").isNull() ? null
-                                : message.path("reasoning_content").asText())
-                .toolCalls(toolCalls).finishReason(choice.path("finish_reason").asText(null))
-                .providerRequestId(root.path("id").asText(null))
-                .rawResponseRef(summarize(responseBody))
+                .reasoningContent(reasoningContent).toolCalls(toolCalls).finishReason(finishReason)
+                .providerRequestId(providerRequestId)
+                // rawResponseRef 只用于定位调用，不得复制可能含业务数据的模型原文。
+                .rawResponseRef(buildSafeResponseReference(providerRequestId, finishReason,
+                        content))
                 .promptTokens(readInteger(usage, "prompt_tokens"))
                 .completionTokens(readInteger(usage, "completion_tokens"))
                 .totalTokens(readInteger(usage, "total_tokens")).build();
@@ -285,7 +335,16 @@ public class DeepSeekProviderAdapter implements LlmProviderAdapter {
         return LlmChatResponse.builder().success(false)
                 .errorCode(normalizeError(statusCode, responseBody))
                 .errorMessage(sanitize(extractProviderErrorMessage(responseBody)))
-                .rawResponseRef(summarize(responseBody)).build();
+                // Provider 错误体可能回显请求片段，通用日志仅保留 HTTP 定位信息。
+                .rawResponseRef("httpStatus=" + statusCode).build();
+    }
+
+    /** 构造不包含模型正文的 Provider 响应定位信息。 */
+    private String buildSafeResponseReference(String providerRequestId, String finishReason,
+            String content) {
+        return "providerRequestId=" + StringUtils.defaultString(providerRequestId, "-")
+                + ", finishReason=" + StringUtils.defaultString(finishReason, "-")
+                + ", contentLength=" + StringUtils.length(content);
     }
 
     /**
@@ -341,17 +400,6 @@ public class DeepSeekProviderAdapter implements LlmProviderAdapter {
             value = value.substring(0, value.length() - 1);
         }
         return value;
-    }
-
-    /**
-     * 生成脱敏响应摘要。
-     */
-    private String summarize(String value) {
-        String sanitized = sanitize(value);
-        if (sanitized == null || sanitized.length() <= RAW_RESPONSE_SUMMARY_LIMIT) {
-            return sanitized;
-        }
-        return sanitized.substring(0, RAW_RESPONSE_SUMMARY_LIMIT);
     }
 
     /**

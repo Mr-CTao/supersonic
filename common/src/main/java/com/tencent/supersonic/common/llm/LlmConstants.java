@@ -24,6 +24,7 @@ public final class LlmConstants {
     public static final String CONTENT_TYPE_TEXT = "text";
     public static final String CONTENT_TYPE_JSON = "json";
     public static final String CONTENT_TYPE_TOOL_RESULT = "tool_result";
+    public static final String CONTENT_TYPE_INTERNAL_JSON_ERROR = "internal_json_error";
 
     public static final String CONVERSATION_ACTIVE = "ACTIVE";
     public static final String CONVERSATION_FAILED = "FAILED";
@@ -42,6 +43,7 @@ public final class LlmConstants {
     public static final String ERROR_MODEL_NOT_FOUND = "MODEL_NOT_FOUND";
     public static final String ERROR_CONTENT_FILTERED = "CONTENT_FILTERED";
     public static final String ERROR_JSON_PARSE_FAILED = "JSON_PARSE_FAILED";
+    public static final String ERROR_JSON_OUTPUT_UNSUPPORTED = "JSON_OUTPUT_UNSUPPORTED";
     public static final String ERROR_TOOL_CALLING_UNSUPPORTED = "TOOL_CALLING_UNSUPPORTED";
     public static final String ERROR_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE";
     public static final String ERROR_UNKNOWN = "UNKNOWN_ERROR";

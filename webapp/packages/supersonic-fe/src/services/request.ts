@@ -11,18 +11,20 @@ import { extend } from 'umi-request';
 import { history } from '@umijs/max';
 import queryString from 'query-string';
 import { AUTH_TOKEN_KEY } from '@/common/constants';
+import { mergeRequestHeaders } from './requestHeaders';
+
+export { mergeRequestHeaders } from './requestHeaders';
 
 export const TOKEN_KEY = AUTH_TOKEN_KEY;
 
 const authHeaderInterceptor = (url: string, options: RequestOptionsInit) => {
-  const headers: any = {};
   const query = queryString.parse(history.location.search) || {};
 
   const rawToken = query[TOKEN_KEY];
   const token = (typeof rawToken === 'string' ? rawToken : null) || localStorage.getItem(TOKEN_KEY);
+  // 必须先保留调用方请求头；草稿创建依赖 Idempotency-Key，覆盖 headers 会让请求在 Controller 前被拒绝。
+  const headers = mergeRequestHeaders(options.headers, token);
   if (token) {
-    headers.Authorization = `Bearer ${token}`;
-    headers.auth = `Bearer ${token}`;
     localStorage.setItem(TOKEN_KEY, token);
   }
 

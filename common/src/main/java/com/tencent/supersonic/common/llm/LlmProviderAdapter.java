@@ -15,6 +15,20 @@ package com.tencent.supersonic.common.llm;
 public interface LlmProviderAdapter {
 
     /**
+     * 返回当前 Adapter 实际支持的 JSON 输出协议。
+     *
+     * <p>
+     * 默认值为 {@link LlmJsonOutputMode#NONE}，避免新增 Provider 在未完成协议适配时仅凭模型能力配置误入 JSON
+     * 调用链路。实现类必须按真实请求协议显式覆写。
+     * </p>
+     *
+     * @return Adapter 的 JSON 输出模式。
+     */
+    default LlmJsonOutputMode jsonOutputMode() {
+        return LlmJsonOutputMode.NONE;
+    }
+
+    /**
      * 判断当前 Adapter 是否支持指定供应商配置。
      *
      * @param providerType 供应商类型，例如 DEEPSEEK。

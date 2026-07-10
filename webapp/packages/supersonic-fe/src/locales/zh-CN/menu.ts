@@ -1,3 +1,8 @@
+/**
+ * Supersonic 简体中文菜单文案模块。
+ *
+ * 职责：集中声明语义建模、AI 语义建模、问答与系统管理等路由菜单的中文标题。
+ */
 export default {
   'menu.welcome': '欢迎',
   'menu.result': '结果页',
@@ -17,6 +22,7 @@ export default {
   'menu.llm': '大模型管理',
   'menu.aiSemanticModeling': 'AI语义建模',
   'menu.aiSemanticModeling.semanticGapPool': '语义缺口池',
+  'menu.aiSemanticModeling.modelingDrafts': '建模草稿',
   'menu.chatSetting': '问答设置',
   'menu.plugin': '插件管理',
   'menu.login': '登录',

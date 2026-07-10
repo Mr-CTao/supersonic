@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supersonic.tencent.com/schema/semantic-modeling-draft-v1.json",
+  "title": "Semantic Modeling Draft 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "businessGoal", "models", "terms", "uncertainties"],
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "businessGoal": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "targetDomain": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "domainId": {"type": ["integer", "null"]},
+        "name": {"type": ["string", "null"], "maxLength": 256},
+        "bizName": {"type": ["string", "null"], "maxLength": 256},
+        "description": {"type": ["string", "null"], "maxLength": 2000}
+      }
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {"$ref": "#/$defs/model"}
+    },
+    "terms": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {"$ref": "#/$defs/term"}
+    },
+    "uncertainties": {
+      "type": "array",
+      "maxItems": 300,
+      "items": {"$ref": "#/$defs/uncertainty"}
+    }
+  },
+  "$defs": {
+    "key": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"},
+    "nullableString": {"type": ["string", "null"], "maxLength": 2000},
+    "aliases": {
+      "type": "array",
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 128}
+    },
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "bizName", "field", "aliases"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "bizName": {"type": "string", "minLength": 1, "maxLength": 256},
+        "field": {"type": "string", "minLength": 1, "maxLength": 256},
+        "description": {"$ref": "#/$defs/nullableString"},
+        "semanticType": {"type": ["string", "null"], "enum": ["DATE", "ID", "CATEGORY", "TEXT", "NUMBER", null]},
+        "aliases": {"$ref": "#/$defs/aliases"}
+      }
+    },
+    "filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "operator", "values"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1, "maxLength": 256},
+        "operator": {"enum": ["EQ", "NE", "GT", "GTE", "LT", "LTE", "IN", "NOT_IN", "BETWEEN", "IS_NULL", "IS_NOT_NULL"]},
+        "values": {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 512}}
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "bizName", "field", "aggregation", "aliases", "filters"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "bizName": {"type": "string", "minLength": 1, "maxLength": 256},
+        "field": {"type": "string", "minLength": 1, "maxLength": 256},
+        "aggregation": {"enum": ["SUM", "COUNT", "COUNT_DISTINCT", "AVG", "MAX", "MIN"]},
+        "expression": {"type": ["string", "null"], "maxLength": 512},
+        "description": {"$ref": "#/$defs/nullableString"},
+        "aliases": {"$ref": "#/$defs/aliases"},
+        "filters": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/filter"}}
+      }
+    },
+    "sensitiveField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "level", "maskingStrategy", "reason"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1, "maxLength": 256},
+        "level": {"enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+        "maskingStrategy": {"enum": ["MASK", "HASH", "REDACT", "NONE"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "bizName", "baseTable", "dimensions", "metrics", "sensitiveFields", "sampleQuestions"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "bizName": {"type": "string", "minLength": 1, "maxLength": 256},
+        "description": {"$ref": "#/$defs/nullableString"},
+        "baseTable": {"type": "string", "minLength": 1, "maxLength": 256},
+        "primaryTimeField": {"type": ["string", "null"], "maxLength": 256},
+        "dimensions": {"type": "array", "maxItems": 300, "items": {"$ref": "#/$defs/dimension"}},
+        "metrics": {"type": "array", "maxItems": 300, "items": {"$ref": "#/$defs/metric"}},
+        "sensitiveFields": {"type": "array", "maxItems": 300, "items": {"$ref": "#/$defs/sensitiveField"}},
+        "sampleQuestions": {"type": "array", "maxItems": 30, "items": {"type": "string", "minLength": 1, "maxLength": 512}}
+      }
+    },
+    "termTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "objectKey"],
+      "properties": {
+        "type": {"enum": ["DIMENSION", "METRIC"]},
+        "objectKey": {"$ref": "#/$defs/key"}
+      }
+    },
+    "term": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "aliases", "targets"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "description": {"$ref": "#/$defs/nullableString"},
+        "aliases": {"$ref": "#/$defs/aliases"},
+        "targets": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/termTarget"}}
+      }
+    },
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "category", "severity", "reason"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "modelKey": {"type": ["string", "null"], "maxLength": 64},
+        "objectKey": {"type": ["string", "null"], "maxLength": 64},
+        "field": {"type": ["string", "null"], "maxLength": 256},
+        "category": {"enum": ["CROSS_TABLE", "ALIAS_CONFLICT", "AMBIGUOUS_TERM", "UNKNOWN_STATUS", "BUSINESS_RULE", "DATA_QUALITY", "OTHER"]},
+        "severity": {"enum": ["INFO", "WARNING", "BLOCKING"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    }
+  }
+}

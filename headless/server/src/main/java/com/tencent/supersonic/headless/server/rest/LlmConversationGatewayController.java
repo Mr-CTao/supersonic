@@ -25,14 +25,17 @@ import java.util.List;
 /**
  * LLM Conversation Gateway 最小调试接口。
  *
- * <p>职责说明：提供阶段 1 验证所需的创建会话、追加消息调用模型、查询会话详情和查询模型能力接口。该 Controller 只调用
- * Gateway 基础能力，不创建语义缺口、不生成 AI 草稿、不发布语义资产。</p>
+ * <p>
+ * 职责说明：提供阶段 1 验证所需的创建会话、追加消息调用模型、查询会话详情和查询模型能力接口。该 Controller 只调用 Gateway 基础能力，不创建语义缺口、不生成 AI
+ * 草稿、不发布语义资产。
+ * </p>
  *
- * <p>并发说明：Controller 本身不保存请求状态；同会话追加顺序由 {@link LlmConversationGatewayService} 内部按 conversationId
- * 互斥保护。</p>
+ * <p>
+ * 并发说明：Controller 本身不保存请求状态；同会话追加顺序由 {@link LlmConversationGatewayService} 内部按 conversationId 互斥保护。
+ * </p>
  */
 @RestController
-@RequestMapping({"/api/llm", "/openapi/llm"})
+@RequestMapping("/api/llm")
 public class LlmConversationGatewayController {
 
     private final LlmConversationGatewayService gatewayService;
@@ -66,23 +69,32 @@ public class LlmConversationGatewayController {
      *
      * @param conversationId 会话 ID。
      * @param req 用户消息和调用参数。
+     * @param httpServletRequest HTTP 请求。
+     * @param httpServletResponse HTTP 响应。
      * @return assistant 响应或统一错误。
      */
     @PostMapping("/conversations/{conversationId}/messages")
-    public LlmMessageCreateResp appendMessageAndChat(@PathVariable("conversationId") Long conversationId,
-            @RequestBody LlmMessageCreateReq req) {
-        return gatewayService.appendMessageAndChat(conversationId, req);
+    public LlmMessageCreateResp appendMessageAndChat(
+            @PathVariable("conversationId") Long conversationId,
+            @RequestBody LlmMessageCreateReq req, HttpServletRequest httpServletRequest,
+            HttpServletResponse httpServletResponse) {
+        User user = UserHolder.findUser(httpServletRequest, httpServletResponse);
+        return gatewayService.appendMessageAndChat(conversationId, req, user);
     }
 
     /**
      * 查询会话详情。
      *
      * @param conversationId 会话 ID。
+     * @param httpServletRequest HTTP 请求。
+     * @param httpServletResponse HTTP 响应。
      * @return 会话详情和本地消息列表。
      */
     @GetMapping("/conversations/{conversationId}")
-    public LlmConversationResp getConversation(@PathVariable("conversationId") Long conversationId) {
-        return gatewayService.getConversation(conversationId);
+    public LlmConversationResp getConversation(@PathVariable("conversationId") Long conversationId,
+            HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse) {
+        User user = UserHolder.findUser(httpServletRequest, httpServletResponse);
+        return gatewayService.getConversation(conversationId, user);
     }
 
     /**
@@ -103,32 +115,44 @@ public class LlmConversationGatewayController {
      * 保存模型能力配置。
      *
      * @param capability 前端编辑后的模型能力。
+     * @param httpServletRequest HTTP 请求。
+     * @param httpServletResponse HTTP 响应。
      * @return 保存后的模型能力。
      */
     @PutMapping("/models/capabilities")
-    public LlmModelCapabilityDO saveCapability(@RequestBody LlmModelCapabilityDO capability) {
-        return gatewayService.saveCapability(capability);
+    public LlmModelCapabilityDO saveCapability(@RequestBody LlmModelCapabilityDO capability,
+            HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse) {
+        User user = UserHolder.findUser(httpServletRequest, httpServletResponse);
+        return gatewayService.saveCapability(capability, user);
     }
 
     /**
      * 查询调用日志列表。
      *
      * @param req 筛选条件。
+     * @param httpServletRequest HTTP 请求。
+     * @param httpServletResponse HTTP 响应。
      * @return 脱敏调用日志列表。
      */
     @PostMapping("/invocation-logs/search")
-    public List<LlmInvocationLogResp> listInvocationLogs(@RequestBody LlmInvocationLogQueryReq req) {
-        return gatewayService.listInvocationLogs(req);
+    public List<LlmInvocationLogResp> listInvocationLogs(@RequestBody LlmInvocationLogQueryReq req,
+            HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse) {
+        User user = UserHolder.findUser(httpServletRequest, httpServletResponse);
+        return gatewayService.listInvocationLogs(req, user);
     }
 
     /**
      * 查询调用日志详情。
      *
      * @param id 调用日志 ID。
+     * @param httpServletRequest HTTP 请求。
+     * @param httpServletResponse HTTP 响应。
      * @return 脱敏调用日志详情。
      */
     @GetMapping("/invocation-logs/{id}")
-    public LlmInvocationLogResp getInvocationLog(@PathVariable("id") Long id) {
-        return gatewayService.getInvocationLog(id);
+    public LlmInvocationLogResp getInvocationLog(@PathVariable("id") Long id,
+            HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse) {
+        User user = UserHolder.findUser(httpServletRequest, httpServletResponse);
+        return gatewayService.getInvocationLog(id, user);
     }
 }

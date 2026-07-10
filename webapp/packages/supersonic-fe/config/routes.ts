@@ -267,6 +267,12 @@ const ROUTES = [
         component: './AISemanticModeling/SemanticGapPool',
         envEnableList: [ENV_KEY.SEMANTIC],
       },
+      {
+        path: '/ai-semantic-modeling/drafts',
+        name: 'modelingDrafts',
+        component: './AISemanticModeling/ModelingDrafts',
+        envEnableList: [ENV_KEY.SEMANTIC],
+      },
     ],
   },
   {

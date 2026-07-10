@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1.0",
+  "businessGoal": "统计订单业务",
+  "targetDomain": null,
+  "models": [
+    {
+      "key": "order_model",
+      "name": "订单模型",
+      "bizName": "OrderModel",
+      "description": null,
+      "baseTable": "selected_table",
+      "primaryTimeField": null,
+      "dimensions": [],
+      "metrics": [],
+      "sensitiveFields": [],
+      "sampleQuestions": ["订单量是多少？"]
+    }
+  ],
+  "terms": [],
+  "uncertainties": []
+}

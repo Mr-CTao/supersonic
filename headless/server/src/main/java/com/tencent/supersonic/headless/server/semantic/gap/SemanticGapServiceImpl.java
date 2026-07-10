@@ -25,10 +25,12 @@ import java.util.stream.IntStream;
 /**
  * 语义缺口服务实现。
  *
- * <p>职责说明：把 Chat BI 的失败、回退和负反馈信号归一化为可治理的 `s2_semantic_gap` 记录，并提供管理端查询和状态流转接口。
- * 安全说明：用户问题、反馈、SQL 和 S2SQL 在写库前会做基础脱敏和长度限制，避免列表页暴露长文本或常见敏感号码。并发说明：
- * Chat BI 主链路通过专用线程池异步提交采集任务；任务内部再按 assistant/domain/failureType/normalizedQuestion 使用分段锁串行化读后写，
- * 保护 occurrence_count、negative_feedback_count 和 priority_score 的一致性；不同 key 分散到不同锁段，避免阻塞整个问答链路。</p>
+ * <p>
+ * 职责说明：把 Chat BI 的失败、回退和负反馈信号归一化为可治理的 `s2_semantic_gap` 记录，并提供管理端查询和状态流转接口。 安全说明：用户问题、反馈、SQL 和
+ * S2SQL 在写库前会做基础脱敏和长度限制，避免列表页暴露长文本或常见敏感号码。并发说明： Chat BI 主链路通过专用线程池异步提交采集任务；任务内部再按
+ * assistant/domain/failureType/normalizedQuestion 使用分段锁串行化读后写， 保护
+ * occurrence_count、negative_feedback_count 和 priority_score 的一致性；不同 key 分散到不同锁段，避免阻塞整个问答链路。
+ * </p>
  */
 @Slf4j
 @Service
@@ -70,11 +72,9 @@ public class SemanticGapServiceImpl implements SemanticGapService {
      * @return 创建或更新后的缺口。
      * @throws IllegalArgumentException 当问题文本为空时抛出，避免产生不可治理的空缺口。
      *
-     * @example
-     * SemanticGapEventReq req = new SemanticGapEventReq();
-     * req.setQuestion("查询库存占用情况");
-     * req.setFailureType(SemanticGapFailureType.NO_SELECTED_PARSE);
-     * semanticGapService.capture(req);
+     * @example SemanticGapEventReq req = new SemanticGapEventReq(); req.setQuestion("查询库存占用情况");
+     *          req.setFailureType(SemanticGapFailureType.NO_SELECTED_PARSE);
+     *          semanticGapService.capture(req);
      */
     @Override
     public SemanticGapDO capture(SemanticGapEventReq eventReq) {
@@ -85,7 +85,8 @@ public class SemanticGapServiceImpl implements SemanticGapService {
         String failureType = normalizeFailureType(eventReq.getFailureType()).name();
         String lockKey = buildAggregationKey(eventReq, normalizedQuestion, failureType);
         synchronized (selectLock(lockKey)) {
-            SemanticGapDO current = findAggregationTarget(eventReq, normalizedQuestion, failureType);
+            SemanticGapDO current =
+                    findAggregationTarget(eventReq, normalizedQuestion, failureType);
             if (current == null) {
                 return createGap(eventReq, normalizedQuestion, failureType);
             }
@@ -98,8 +99,10 @@ public class SemanticGapServiceImpl implements SemanticGapService {
      *
      * @param eventReq 问答链路上报事件。
      *
-     * <p>并发说明：调用方只负责提交任务；线程池队列满时记录 warning 并丢弃采集事件，避免把缺口治理的写库压力传导到问答接口。
-     * 任务内部捕获全部异常，保证采集失败不会影响业务主链路。</p>
+     *        <p>
+     *        并发说明：调用方只负责提交任务；线程池队列满时记录 warning 并丢弃采集事件，避免把缺口治理的写库压力传导到问答接口。
+     *        任务内部捕获全部异常，保证采集失败不会影响业务主链路。
+     *        </p>
      */
     @Override
     public void captureAsync(SemanticGapEventReq eventReq) {
@@ -127,9 +130,11 @@ public class SemanticGapServiceImpl implements SemanticGapService {
     @Override
     public PageInfo<SemanticGapDO> query(SemanticGapQueryReq queryReq) {
         SemanticGapQueryReq safeReq = queryReq == null ? new SemanticGapQueryReq() : queryReq;
-        int page = safeReq.getPage() == null || safeReq.getPage() <= 0 ? DEFAULT_PAGE : safeReq.getPage();
-        int pageSize = safeReq.getPageSize() == null || safeReq.getPageSize() <= 0
-                ? DEFAULT_PAGE_SIZE : Math.min(safeReq.getPageSize(), MAX_PAGE_SIZE);
+        int page = safeReq.getPage() == null || safeReq.getPage() <= 0 ? DEFAULT_PAGE
+                : safeReq.getPage();
+        int pageSize =
+                safeReq.getPageSize() == null || safeReq.getPageSize() <= 0 ? DEFAULT_PAGE_SIZE
+                        : Math.min(safeReq.getPageSize(), MAX_PAGE_SIZE);
         LambdaQueryWrapper<SemanticGapDO> wrapper = buildQueryWrapper(safeReq);
         return PageHelper.startPage(page, pageSize)
                 .doSelectPageInfo(() -> semanticGapMapper.selectList(wrapper));
@@ -161,11 +166,23 @@ public class SemanticGapServiceImpl implements SemanticGapService {
     public SemanticGapDO ignore(Long id, SemanticGapActionReq req, String operator) {
         SemanticGapDO gap = requireGap(id);
         validateIgnoreTransition(gap);
-        gap.setStatus(SemanticGapStatus.IGNORED.name());
-        gap.setIgnoreReason(truncate(sanitizeText(req == null ? null : req.getReason()), REASON_MAX_LENGTH));
-        gap.setUpdatedAt(new Date());
-        gap.setUpdatedBy(StringUtils.defaultIfBlank(operator, SYSTEM_CREATOR));
-        semanticGapMapper.updateById(gap);
+        Date now = new Date();
+        String ignoreReason =
+                truncate(sanitizeText(req == null ? null : req.getReason()), REASON_MAX_LENGTH);
+        String updatedBy = StringUtils.defaultIfBlank(operator, SYSTEM_CREATOR);
+        int updated = semanticGapMapper.update(null,
+                new LambdaUpdateWrapper<SemanticGapDO>().eq(SemanticGapDO::getId, id)
+                        // 状态必须在 UPDATE 时再次判断；若阶段 3 已把缺口转为 DRAFTING，
+                        // PostgreSQL 等待行锁后会得到 0 行，不能用先前读到的旧状态覆盖。
+                        .in(SemanticGapDO::getStatus, SemanticGapStatus.PENDING_ANALYSIS.name(),
+                                SemanticGapStatus.REOPENED.name(), SemanticGapStatus.IGNORED.name())
+                        .set(SemanticGapDO::getStatus, SemanticGapStatus.IGNORED.name())
+                        .set(SemanticGapDO::getIgnoreReason, ignoreReason)
+                        .set(SemanticGapDO::getUpdatedAt, now)
+                        .set(SemanticGapDO::getUpdatedBy, updatedBy));
+        if (updated != 1) {
+            throw new IllegalStateException("semantic gap status changed, please reload");
+        }
         return semanticGapMapper.selectById(id);
     }
 
@@ -185,11 +202,13 @@ public class SemanticGapServiceImpl implements SemanticGapService {
         // MyBatis-Plus 默认跳过 null 字段，重新打开必须显式清空忽略原因，避免详情页继续展示旧处理意见。
         LambdaUpdateWrapper<SemanticGapDO> wrapper = new LambdaUpdateWrapper<>();
         wrapper.eq(SemanticGapDO::getId, id)
+                .eq(SemanticGapDO::getStatus, SemanticGapStatus.IGNORED.name())
                 .set(SemanticGapDO::getStatus, SemanticGapStatus.REOPENED.name())
-                .set(SemanticGapDO::getIgnoreReason, null)
-                .set(SemanticGapDO::getUpdatedAt, now)
+                .set(SemanticGapDO::getIgnoreReason, null).set(SemanticGapDO::getUpdatedAt, now)
                 .set(SemanticGapDO::getUpdatedBy, updatedBy);
-        semanticGapMapper.update(null, wrapper);
+        if (semanticGapMapper.update(null, wrapper) != 1) {
+            throw new IllegalStateException("semantic gap status changed, please reload");
+        }
         return semanticGapMapper.selectById(id);
     }
 
@@ -211,7 +230,8 @@ public class SemanticGapServiceImpl implements SemanticGapService {
         LambdaQueryWrapper<SemanticGapDO> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(queryReq.getAssistantId() != null, SemanticGapDO::getAssistantId,
                 queryReq.getAssistantId());
-        wrapper.eq(queryReq.getDomainId() != null, SemanticGapDO::getDomainId, queryReq.getDomainId());
+        wrapper.eq(queryReq.getDomainId() != null, SemanticGapDO::getDomainId,
+                queryReq.getDomainId());
         wrapper.eq(queryReq.getDataSourceId() != null, SemanticGapDO::getDataSourceId,
                 queryReq.getDataSourceId());
         wrapper.eq(StringUtils.isNotBlank(queryReq.getFailureType()), SemanticGapDO::getFailureType,
@@ -220,9 +240,9 @@ public class SemanticGapServiceImpl implements SemanticGapService {
                 queryReq.getStatus());
         if (StringUtils.isNotBlank(queryReq.getKeyword())) {
             String keyword = sanitizeText(queryReq.getKeyword());
-            wrapper.and(w -> w.like(SemanticGapDO::getQuestion, keyword)
-                    .or().like(SemanticGapDO::getFailureReason, keyword)
-                    .or().like(SemanticGapDO::getFeedback, keyword));
+            wrapper.and(w -> w.like(SemanticGapDO::getQuestion, keyword).or()
+                    .like(SemanticGapDO::getFailureReason, keyword).or()
+                    .like(SemanticGapDO::getFeedback, keyword));
         }
         Date startTime = parseTime(queryReq.getStartTime(), false);
         Date endTime = parseTime(queryReq.getEndTime(), true);
@@ -265,7 +285,8 @@ public class SemanticGapServiceImpl implements SemanticGapService {
         gap.setDomainId(eventReq.getDomainId());
         gap.setDataSourceId(eventReq.getDataSourceId());
         gap.setFailureType(failureType);
-        gap.setFailureReason(truncate(sanitizeText(eventReq.getFailureReason()), REASON_MAX_LENGTH));
+        gap.setFailureReason(
+                truncate(sanitizeText(eventReq.getFailureReason()), REASON_MAX_LENGTH));
         gap.setMatchedModelIds(truncate(eventReq.getMatchedModelIds(), 1000));
         gap.setMatchedMetricIds(truncate(eventReq.getMatchedMetricIds(), 1000));
         gap.setMatchedDimensionIds(truncate(eventReq.getMatchedDimensionIds(), 1000));
@@ -299,21 +320,46 @@ public class SemanticGapServiceImpl implements SemanticGapService {
         current.setUpdatedBy(StringUtils.defaultIfBlank(eventReq.getUserName(), SYSTEM_CREATOR));
         current.setFailureReason(mergeText(current.getFailureReason(), eventReq.getFailureReason(),
                 REASON_MAX_LENGTH));
-        current.setFeedback(mergeText(current.getFeedback(), eventReq.getFeedback(), FEEDBACK_MAX_LENGTH));
+        current.setFeedback(
+                mergeText(current.getFeedback(), eventReq.getFeedback(), FEEDBACK_MAX_LENGTH));
         current.setGeneratedSql(firstNonBlank(current.getGeneratedSql(),
                 truncate(sanitizeSql(eventReq.getGeneratedSql()), SQL_MAX_LENGTH)));
         current.setS2sql(firstNonBlank(current.getS2sql(),
                 truncate(sanitizeSql(eventReq.getS2sql()), SQL_MAX_LENGTH)));
-        current.setMatchedModelIds(firstNonBlank(current.getMatchedModelIds(), eventReq.getMatchedModelIds()));
-        current.setMatchedMetricIds(firstNonBlank(current.getMatchedMetricIds(), eventReq.getMatchedMetricIds()));
-        current.setMatchedDimensionIds(firstNonBlank(current.getMatchedDimensionIds(),
-                eventReq.getMatchedDimensionIds()));
+        current.setMatchedModelIds(
+                firstNonBlank(current.getMatchedModelIds(), eventReq.getMatchedModelIds()));
+        current.setMatchedMetricIds(
+                firstNonBlank(current.getMatchedMetricIds(), eventReq.getMatchedMetricIds()));
+        current.setMatchedDimensionIds(
+                firstNonBlank(current.getMatchedDimensionIds(), eventReq.getMatchedDimensionIds()));
         current.setSourceQueryId(eventReq.getQueryId());
         current.setSourceChatId(eventReq.getChatId());
-        current.setRecentQuestions(appendRecentQuestion(current.getRecentQuestions(), eventReq.getQuestion()));
+        current.setRecentQuestions(
+                appendRecentQuestion(current.getRecentQuestions(), eventReq.getQuestion()));
         current.setPriorityScore(calculatePriority(current));
-        // 重复采集只更新统计和诊断上下文，不隐式改变状态；已忽略缺口不会因再次出现而自动 reopen。
-        semanticGapMapper.updateById(current);
+        // 只更新统计和诊断列，刻意不携带 status/ignoreReason。这样阶段 3 的行锁状态流转
+        // 即使与采集并发，也不会在 PostgreSQL 等待锁后被旧实体中的状态覆盖。
+        LambdaUpdateWrapper<SemanticGapDO> update = new LambdaUpdateWrapper<>();
+        update.eq(SemanticGapDO::getId, current.getId())
+                .set(SemanticGapDO::getOccurrenceCount, current.getOccurrenceCount())
+                .set(SemanticGapDO::getNegativeFeedbackCount, current.getNegativeFeedbackCount())
+                .set(SemanticGapDO::getLastSeenAt, current.getLastSeenAt())
+                .set(SemanticGapDO::getUpdatedAt, current.getUpdatedAt())
+                .set(SemanticGapDO::getUpdatedBy, current.getUpdatedBy())
+                .set(SemanticGapDO::getFailureReason, current.getFailureReason())
+                .set(SemanticGapDO::getFeedback, current.getFeedback())
+                .set(SemanticGapDO::getGeneratedSql, current.getGeneratedSql())
+                .set(SemanticGapDO::getS2sql, current.getS2sql())
+                .set(SemanticGapDO::getMatchedModelIds, current.getMatchedModelIds())
+                .set(SemanticGapDO::getMatchedMetricIds, current.getMatchedMetricIds())
+                .set(SemanticGapDO::getMatchedDimensionIds, current.getMatchedDimensionIds())
+                .set(eventReq.getQueryId() != null, SemanticGapDO::getSourceQueryId,
+                        current.getSourceQueryId())
+                .set(eventReq.getChatId() != null, SemanticGapDO::getSourceChatId,
+                        current.getSourceChatId())
+                .set(SemanticGapDO::getRecentQuestions, current.getRecentQuestions())
+                .set(SemanticGapDO::getPriorityScore, current.getPriorityScore());
+        semanticGapMapper.update(null, update);
         return semanticGapMapper.selectById(current.getId());
     }
 

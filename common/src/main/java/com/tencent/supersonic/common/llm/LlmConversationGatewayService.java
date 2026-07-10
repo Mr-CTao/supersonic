@@ -13,33 +13,41 @@ import com.tencent.supersonic.common.persistence.mapper.LlmMessageMapper;
 import com.tencent.supersonic.common.persistence.mapper.LlmModelCapabilityMapper;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.service.ChatModelService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * LLM Conversation Gateway 核心服务。
  *
  * <p>
  * 职责说明：复用现有 `s2_chat_model` 配置创建本地会话，按 `llm_message` 顺序拼接完整 messages，选择 Provider Adapter
- * 发起非流式调用，并持久化 assistant 消息与调用日志。DeepSeek 是无状态 API，因此多轮上下文只能由本服务读取本地消息表后完整拼接， Adapter 不允许重新查询业务历史。
+ * 发起非流式调用，并持久化通用调用日志。DeepSeek 是无状态 API，因此多轮上下文只能由本服务读取本地消息表后完整拼接， Adapter 不允许重新查询业务历史。
+ * `SEMANTIC_MODELING` 会话含有表结构、脱敏样例和模型原文，其 assistant 输出不写入通用消息表，也不通过会话/日志 API
+ * 返回；原文只通过 Jackson 忽略的内部字段交给建模 attempt 链路保存。
  * </p>
  *
  * <p>
- * 并发说明：同一会话追加消息需要保持 `message_order` 单调递增。当前阶段使用 `conversationLocks` 以 conversationId 为粒度做 JVM
- * 内互斥，并依赖数据库唯一键 `(conversation_id, message_order)` 阻断异常重复；多实例部署时仍建议后续升级为数据库乐观锁或 `SELECT ... FOR
- * UPDATE`。
+ * 并发说明：同一会话追加消息需要保持 `message_order` 单调递增。当前阶段使用固定数量的公平条带锁按 conversationId 做 JVM 内互斥，
+ * 避免按会话永久缓存锁对象造成内存增长，并依赖数据库唯一键 `(conversation_id, message_order)` 阻断异常重复。哈希碰撞只会让不同会话短暂串行，
+ * 不影响正确性；多实例部署时仍建议后续升级为数据库乐观锁或 `SELECT ... FOR UPDATE`。
  * </p>
  */
 @Slf4j
@@ -47,9 +55,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public class LlmConversationGatewayService {
 
     private static final String DEFAULT_CONVERSATION_TYPE = "LLM_DEBUG";
+    private static final String SEMANTIC_MODELING_CONVERSATION_TYPE = "SEMANTIC_MODELING";
     private static final String DEFAULT_USAGE_SCENE = "semantic_modeling";
     private static final int DEFAULT_CONTEXT_TOKENS = 128000;
     private static final int MESSAGE_SUMMARY_LIMIT = 800;
+    private static final int CONVERSATION_LOCK_STRIPE_COUNT = 64;
 
     private final ChatModelService chatModelService;
     private final LlmProviderAdapterRegistry adapterRegistry;
@@ -57,7 +67,7 @@ public class LlmConversationGatewayService {
     private final LlmConversationMapper conversationMapper;
     private final LlmMessageMapper messageMapper;
     private final LlmInvocationLogMapper invocationLogMapper;
-    private final Map<Long, Object> conversationLocks = new ConcurrentHashMap<>();
+    private final ReentrantLock[] conversationLocks = createConversationLocks();
 
     /**
      * 创建 Gateway 服务。
@@ -92,7 +102,7 @@ public class LlmConversationGatewayService {
     @Transactional
     public LlmConversationResp createConversation(LlmConversationCreateReq req, User user) {
         Integer chatModelId = resolveChatModelId(req.getChatModelId(), req.getProviderId());
-        ChatModel chatModel = requireChatModel(chatModelId);
+        ChatModel chatModel = requireVisibleChatModel(chatModelId, user);
         ChatModelConfig config = requireChatModelConfig(chatModel);
         String providerType = resolveProviderType(config);
         String modelName = StringUtils.defaultIfBlank(req.getModelName(), config.getModelName());
@@ -124,24 +134,69 @@ public class LlmConversationGatewayService {
      * @param conversationId 会话 ID。
      * @param req 用户消息和调用参数。
      * @return 模型调用结果。
+     * @throws IllegalArgumentException 当会话、模型配置或调用参数非法时抛出。
+     * @throws RuntimeException 当 Provider 调用或消息持久化发生未恢复异常时抛出；条带锁仍会在 {@code finally} 中释放。
      */
     @Transactional
     public LlmMessageCreateResp appendMessageAndChat(Long conversationId, LlmMessageCreateReq req) {
-        Object lock = conversationLocks.computeIfAbsent(conversationId, ignored -> new Object());
-        synchronized (lock) {
+        ReentrantLock lock = getConversationLock(conversationId);
+        lock.lock();
+        try {
             return appendMessageAndChatLocked(conversationId, req);
+        } finally {
+            // 显式 finally 保证 Provider、数据库或参数异常均不会永久占用条带锁。
+            lock.unlock();
         }
+    }
+
+    /**
+     * 校验当前用户为会话创建者或超级管理员后追加消息。
+     *
+     * @param conversationId 会话 ID。
+     * @param req 用户消息和调用参数。
+     * @param user 当前登录用户。
+     * @return 模型调用结果。
+     * @throws InvalidPermissionException 用户无权访问该会话时抛出。
+     */
+    @Transactional
+    public LlmMessageCreateResp appendMessageAndChat(Long conversationId, LlmMessageCreateReq req,
+            User user) {
+        assertConversationAccess(conversationId, user);
+        return appendMessageAndChat(conversationId, req);
+    }
+
+    /**
+     * 在不持有数据库事务的情况下追加消息并调用模型。
+     *
+     * <p>
+     * 职责说明：供阶段 3 等后台编排使用，进入方法时暂停调用方事务，再复用与普通入口相同的条带锁、 消息持久化和 Provider
+     * 适配逻辑。这样网络等待不会长期占用数据库连接；各条本地持久化语句独立提交， 最终业务状态仍由调用方自己的短事务保存。
+     * </p>
+     *
+     * @param conversationId 会话 ID。
+     * @param req 用户消息和调用参数。
+     * @return 模型调用结果。
+     * @throws RuntimeException 当 Provider 或本地持久化发生异常时抛出。
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public LlmMessageCreateResp appendMessageAndChatWithoutTransaction(Long conversationId,
+            LlmMessageCreateReq req) {
+        // 同类内部调用不会再次经过 Spring 事务代理，因此原入口的 REQUIRED 不会重新开启事务。
+        return appendMessageAndChat(conversationId, req);
     }
 
     /**
      * 查询会话详情。
      *
      * @param conversationId 会话 ID。
+     * @param user 当前登录用户。
      * @return 会话详情。
      * @throws IllegalArgumentException 当会话不存在时抛出。
+     * @throws InvalidPermissionException 用户无权读取该会话时抛出。
      */
-    public LlmConversationResp getConversation(Long conversationId) {
+    public LlmConversationResp getConversation(Long conversationId, User user) {
         LlmConversationDO conversation = requireConversation(conversationId);
+        requireConversationOwner(conversation, user);
         return buildConversationResp(conversation, listMessages(conversationId));
     }
 
@@ -161,11 +216,15 @@ public class LlmConversationGatewayService {
      * 保存模型能力配置。
      *
      * @param capability 前端编辑后的能力配置。
+     * @param user 当前登录用户，仅超级管理员可修改模型能力门禁。
      * @return 保存后的能力配置。
      * @throws IllegalArgumentException 当必要字段缺失时抛出。
      */
     @Transactional
-    public LlmModelCapabilityDO saveCapability(LlmModelCapabilityDO capability) {
+    public LlmModelCapabilityDO saveCapability(LlmModelCapabilityDO capability, User user) {
+        if (!isSuperAdmin(user)) {
+            throw new InvalidPermissionException("只有超级管理员可以修改 LLM 模型能力");
+        }
         if (capability == null || capability.getChatModelId() == null
                 || StringUtils.isBlank(capability.getModelName())) {
             throw new IllegalArgumentException("chatModelId and modelName are required.");
@@ -203,30 +262,47 @@ public class LlmConversationGatewayService {
      * 查询 LLM 调用日志。
      *
      * @param req 筛选条件。
+     * @param user 当前登录用户；非超级管理员仅能查询自己创建会话的日志。
      * @return 脱敏后的调用日志列表。
      */
-    public List<LlmInvocationLogResp> listInvocationLogs(LlmInvocationLogQueryReq req) {
-        LambdaQueryWrapper<LlmInvocationLogDO> wrapper = buildInvocationLogQuery(req);
-        wrapper.orderByDesc(LlmInvocationLogDO::getCreatedAt);
+    public List<LlmInvocationLogResp> listInvocationLogs(LlmInvocationLogQueryReq req, User user) {
         Integer pageSize = req == null || req.getPageSize() == null ? 20 : req.getPageSize();
-        wrapper.last("limit " + Math.max(1, Math.min(pageSize, 200)));
-        return invocationLogMapper.selectList(wrapper).stream().map(this::buildInvocationLogResp)
-                .toList();
+        int safeLimit = Math.max(1, Math.min(pageSize, 200));
+        String createdBy = isSuperAdmin(user) ? null : requireUserName(user);
+        // 权限过滤必须在数据库内完成，不能把长期累积的会话 ID 拉入 JVM 后再拼装 IN。
+        List<LlmInvocationLogDO> logs =
+                invocationLogMapper.selectAccessibleLogs(req, createdBy, safeLimit);
+        return buildInvocationLogResponses(logs);
     }
 
     /**
      * 查询调用日志详情。
      *
      * @param logId 调用日志 ID。
+     * @param user 当前登录用户。
      * @return 调用日志详情。
      * @throws IllegalArgumentException 当日志不存在时抛出。
+     * @throws InvalidPermissionException 用户无权读取日志所属会话时抛出。
      */
-    public LlmInvocationLogResp getInvocationLog(Long logId) {
+    public LlmInvocationLogResp getInvocationLog(Long logId, User user) {
         LlmInvocationLogDO logDO = invocationLogMapper.selectById(logId);
         if (logDO == null) {
             throw new IllegalArgumentException("LLM invocation log not found: " + logId);
         }
+        assertConversationAccess(logDO.getConversationId(), user);
         return buildInvocationLogResp(logDO);
+    }
+
+    /**
+     * 校验当前用户可访问指定会话，供 REST 调试入口复用。
+     *
+     * @param conversationId 会话 ID。
+     * @param user 当前登录用户。
+     * @throws IllegalArgumentException 会话不存在时抛出。
+     * @throws InvalidPermissionException 用户既非创建者也非超级管理员时抛出。
+     */
+    public void assertConversationAccess(Long conversationId, User user) {
+        requireConversationOwner(requireConversation(conversationId), user);
     }
 
     /**
@@ -275,39 +351,95 @@ public class LlmConversationGatewayService {
         LlmChatRequest adapterRequest = buildAdapterRequest(conversation, config, capability, req);
         LlmProviderAdapter adapter = adapterRegistry.getAdapter(adapterRequest.getProviderType(),
                 adapterRequest.getBaseUrl(), adapterRequest.getModelName());
+        LlmMessageCreateResp jsonModeRejection = validateAdapterJsonOutputMode(userMessage.getId(),
+                req, adapter);
+        if (jsonModeRejection != null) {
+            return jsonModeRejection;
+        }
         long start = System.currentTimeMillis();
         LlmChatResponse adapterResponse = adapter.chat(adapterRequest);
         long latencyMs = System.currentTimeMillis() - start;
-        saveInvocationLog(conversation, adapterResponse, latencyMs);
+        String requestId = resolveRequestId(adapterResponse);
+        saveInvocationLog(conversation, adapterResponse, requestId, latencyMs);
 
         if (!adapterResponse.isSuccess()) {
+            LlmMessageDO invalidAssistantMessage = saveInvalidAssistantMessage(conversation,
+                    adapterResponse, nextOrder + 1);
             conversation.setStatus(LlmConstants.CONVERSATION_FAILED);
             conversation.setUpdatedAt(new Date());
             conversationMapper.updateById(conversation);
-            return LlmMessageCreateResp.builder().messageId(userMessage.getId())
-                    .status(LlmConstants.INVOCATION_FAILED)
-                    .errorCode(adapterResponse.getErrorCode())
-                    .errorMessage(adapterResponse.getErrorMessage())
-                    .providerRequestId(adapterResponse.getProviderRequestId())
-                    .promptTokens(adapterResponse.getPromptTokens())
-                    .completionTokens(adapterResponse.getCompletionTokens())
-                    .totalTokens(adapterResponse.getTotalTokens()).latencyMs(latencyMs).build();
+            return buildFailedInvocationResp(userMessage.getId(), invalidAssistantMessage,
+                    adapterResponse, requestId, latencyMs,
+                    isSemanticModelingConversation(conversation));
         }
 
-        LlmMessageDO assistantMessage = saveMessage(conversationId, LlmConstants.ROLE_ASSISTANT,
-                adapterResponse.getContent(), adapterResponse.getReasoningContent(),
-                resolveContentType(req.getResponseFormat()), adapterResponse.getToolCalls(), null,
-                nextOrder + 1);
+        boolean semanticModeling = isSemanticModelingConversation(conversation);
+        // 建模原文的唯一持久化位置是 attempt 表；通用消息表不保留成功/失败输出副本。
+        LlmMessageDO assistantMessage = semanticModeling ? null
+                : saveMessage(conversationId, LlmConstants.ROLE_ASSISTANT,
+                        adapterResponse.getContent(), adapterResponse.getReasoningContent(),
+                        resolveContentType(req.getResponseFormat()), adapterResponse.getToolCalls(),
+                        null, nextOrder + 1);
         conversation.setStatus(LlmConstants.CONVERSATION_ACTIVE);
         conversation.setUpdatedAt(new Date());
         conversationMapper.updateById(conversation);
 
         return LlmMessageCreateResp.builder().messageId(userMessage.getId())
-                .assistantMessageId(assistantMessage.getId())
-                .assistantContent(adapterResponse.getContent())
-                .parsedJson(adapterResponse.getParsedJson())
-                .reasoningContent(adapterResponse.getReasoningContent())
-                .toolCalls(adapterResponse.getToolCalls()).status(LlmConstants.INVOCATION_SUCCESS)
+                .assistantMessageId(assistantMessage == null ? null : assistantMessage.getId())
+                .assistantContent(semanticModeling ? null : adapterResponse.getContent())
+                .internalAssistantContent(semanticModeling
+                        ? resolveInternalAssistantContent(adapterResponse)
+                        : null)
+                .parsedJson(semanticModeling ? null : adapterResponse.getParsedJson())
+                .reasoningContent(semanticModeling ? null : adapterResponse.getReasoningContent())
+                .toolCalls(semanticModeling ? null : adapterResponse.getToolCalls())
+                .status(LlmConstants.INVOCATION_SUCCESS)
+                .requestId(requestId)
+                .providerRequestId(adapterResponse.getProviderRequestId())
+                .promptTokens(adapterResponse.getPromptTokens())
+                .completionTokens(adapterResponse.getCompletionTokens())
+                .totalTokens(adapterResponse.getTotalTokens()).latencyMs(latencyMs).build();
+    }
+
+    /**
+     * JSON 解析失败时为普通调试会话保存原文。
+     *
+     * <p>
+     * 语义建模的 raw/repaired output 必须只存在 attempt 表，因此返回 {@code null}，不向通用消息表写入。
+     * </p>
+     */
+    private LlmMessageDO saveInvalidAssistantMessage(LlmConversationDO conversation,
+            LlmChatResponse adapterResponse, int messageOrder) {
+        if (!LlmConstants.ERROR_JSON_PARSE_FAILED.equals(adapterResponse.getErrorCode())
+                || StringUtils.isBlank(adapterResponse.getContent())) {
+            return null;
+        }
+        if (isSemanticModelingConversation(conversation)) {
+            return null;
+        }
+        return saveMessage(conversation.getId(), LlmConstants.ROLE_ASSISTANT,
+                adapterResponse.getContent(), adapterResponse.getReasoningContent(),
+                LlmConstants.CONTENT_TYPE_INTERNAL_JSON_ERROR, adapterResponse.getToolCalls(), null,
+                messageOrder);
+    }
+
+    /**
+     * 构造 Provider 调用失败响应；无效正文只进入 Jackson 忽略的后台字段。
+     */
+    private LlmMessageCreateResp buildFailedInvocationResp(Long userMessageId,
+            LlmMessageDO invalidAssistantMessage, LlmChatResponse adapterResponse, String requestId,
+            long latencyMs, boolean semanticModeling) {
+        Long assistantMessageId = invalidAssistantMessage == null ? null
+                : invalidAssistantMessage.getId();
+        String internalAssistantContent = LlmConstants.ERROR_JSON_PARSE_FAILED
+                .equals(adapterResponse.getErrorCode()) ? adapterResponse.getContent() : null;
+        return LlmMessageCreateResp.builder().messageId(userMessageId)
+                .assistantMessageId(assistantMessageId)
+                .internalAssistantContent(internalAssistantContent)
+                .status(LlmConstants.INVOCATION_FAILED).errorCode(adapterResponse.getErrorCode())
+                .errorMessage(semanticModeling ? buildSafeInvocationError(adapterResponse)
+                        : adapterResponse.getErrorMessage())
+                .requestId(requestId)
                 .providerRequestId(adapterResponse.getProviderRequestId())
                 .promptTokens(adapterResponse.getPromptTokens())
                 .completionTokens(adapterResponse.getCompletionTokens())
@@ -357,22 +489,26 @@ public class LlmConversationGatewayService {
      * 保存调用日志，日志失败只记录告警，不覆盖模型调用主错误。
      */
     private void saveInvocationLog(LlmConversationDO conversation, LlmChatResponse response,
-            long latencyMs) {
+            String requestId, long latencyMs) {
         try {
             LlmInvocationLogDO logDO = new LlmInvocationLogDO();
             logDO.setConversationId(conversation.getId());
             logDO.setChatModelId(conversation.getChatModelId());
             logDO.setProviderType(conversation.getProviderType());
             logDO.setModelName(conversation.getModelName());
-            logDO.setRequestId(response.getProviderRequestId());
+            logDO.setRequestId(requestId);
             logDO.setPromptTokens(response.getPromptTokens());
             logDO.setCompletionTokens(response.getCompletionTokens());
             logDO.setTotalTokens(response.getTotalTokens());
             logDO.setLatencyMs(latencyMs);
             logDO.setStatus(resolveInvocationStatus(response));
             logDO.setErrorCode(response.getErrorCode());
-            logDO.setErrorMessage(truncate(response.getErrorMessage()));
-            logDO.setRawResponseRef(truncate(response.getRawResponseRef()));
+            logDO.setErrorMessage(isSemanticModelingConversation(conversation)
+                    ? truncate(buildSafeInvocationError(response))
+                    : truncate(response.getErrorMessage()));
+            // 建模日志只保留 requestId/usage/状态，禁止复制 Provider 响应摘要。
+            logDO.setRawResponseRef(isSemanticModelingConversation(conversation) ? null
+                    : truncate(response.getRawResponseRef()));
             logDO.setCreatedAt(new Date());
             invocationLogMapper.insert(logDO);
         } catch (Exception exception) {
@@ -431,37 +567,15 @@ public class LlmConversationGatewayService {
      */
     private LlmConversationResp buildConversationResp(LlmConversationDO conversation,
             List<LlmMessageDO> messages) {
+        List<LlmMessageDO> visibleMessages = isSemanticModelingConversation(conversation)
+                ? List.of()
+                : messages == null ? List.of()
+                : messages.stream().filter(message -> !isInternalMessage(message)).toList();
         return LlmConversationResp.builder().conversationId(conversation.getId())
                 .chatModelId(conversation.getChatModelId())
                 .providerId(conversation.getChatModelId())
                 .providerType(conversation.getProviderType()).modelName(conversation.getModelName())
-                .status(conversation.getStatus()).messages(messages).build();
-    }
-
-    /**
-     * 构造调用日志筛选条件。
-     */
-    private LambdaQueryWrapper<LlmInvocationLogDO> buildInvocationLogQuery(
-            LlmInvocationLogQueryReq req) {
-        LambdaQueryWrapper<LlmInvocationLogDO> wrapper = new LambdaQueryWrapper<>();
-        if (req == null) {
-            return wrapper;
-        }
-        wrapper.eq(StringUtils.isNotBlank(req.getProviderType()),
-                LlmInvocationLogDO::getProviderType, req.getProviderType());
-        wrapper.eq(StringUtils.isNotBlank(req.getModelName()), LlmInvocationLogDO::getModelName,
-                req.getModelName());
-        wrapper.eq(StringUtils.isNotBlank(req.getStatus()), LlmInvocationLogDO::getStatus,
-                req.getStatus());
-        wrapper.eq(StringUtils.isNotBlank(req.getErrorCode()), LlmInvocationLogDO::getErrorCode,
-                req.getErrorCode());
-        wrapper.eq(req.getConversationId() != null, LlmInvocationLogDO::getConversationId,
-                req.getConversationId());
-        wrapper.ge(StringUtils.isNotBlank(req.getStartTime()), LlmInvocationLogDO::getCreatedAt,
-                req.getStartTime());
-        wrapper.le(StringUtils.isNotBlank(req.getEndTime()), LlmInvocationLogDO::getCreatedAt,
-                req.getEndTime());
-        return wrapper;
+                .status(conversation.getStatus()).messages(visibleMessages).build();
     }
 
     /**
@@ -469,7 +583,62 @@ public class LlmConversationGatewayService {
      */
     private LlmInvocationLogResp buildInvocationLogResp(LlmInvocationLogDO logDO) {
         LlmConversationDO conversation = conversationMapper.selectById(logDO.getConversationId());
-        List<LlmMessageDO> messages = listMessages(logDO.getConversationId());
+        // 建模日志不需要读取 Prompt/样例到 JVM，从数据源头阻断误暴露。
+        List<LlmMessageDO> messages = isSemanticModelingConversation(conversation) ? List.of()
+                : listMessages(logDO.getConversationId());
+        return buildInvocationLogResp(logDO, conversation, messages);
+    }
+
+    /** 批量加载列表所需的会话和消息，避免每条日志分别执行两次查询。 */
+    private List<LlmInvocationLogResp> buildInvocationLogResponses(
+            List<LlmInvocationLogDO> logs) {
+        if (logs == null || logs.isEmpty()) {
+            return List.of();
+        }
+        Set<Long> conversationIds = new LinkedHashSet<>();
+        for (LlmInvocationLogDO log : logs) {
+            if (log.getConversationId() != null) {
+                conversationIds.add(log.getConversationId());
+            }
+        }
+        if (conversationIds.isEmpty()) {
+            return logs.stream().map(log -> buildInvocationLogResp(log, null, List.of())).toList();
+        }
+
+        Map<Long, LlmConversationDO> conversationById = new HashMap<>();
+        for (LlmConversationDO conversation : conversationMapper.selectByIds(conversationIds)) {
+            if (conversation.getId() != null) {
+                conversationById.put(conversation.getId(), conversation);
+            }
+        }
+        Set<Long> visibleMessageConversationIds = new LinkedHashSet<>();
+        for (Long conversationId : conversationIds) {
+            if (!isSemanticModelingConversation(conversationById.get(conversationId))) {
+                visibleMessageConversationIds.add(conversationId);
+            }
+        }
+        Map<Long, List<LlmMessageDO>> messagesByConversation = new HashMap<>();
+        List<LlmMessageDO> messages = visibleMessageConversationIds.isEmpty() ? List.of()
+                : messageMapper.selectList(new LambdaQueryWrapper<LlmMessageDO>()
+                        .in(LlmMessageDO::getConversationId, visibleMessageConversationIds)
+                        .orderByAsc(LlmMessageDO::getConversationId)
+                        .orderByAsc(LlmMessageDO::getMessageOrder));
+        for (LlmMessageDO message : messages) {
+            messagesByConversation
+                    .computeIfAbsent(message.getConversationId(), ignored -> new ArrayList<>())
+                    .add(message);
+        }
+        return logs.stream()
+                .map(log -> buildInvocationLogResp(log,
+                        conversationById.get(log.getConversationId()), messagesByConversation
+                                .getOrDefault(log.getConversationId(), List.of())))
+                .toList();
+    }
+
+    /** 使用已批量加载的会话和消息构造单条脱敏日志响应。 */
+    private LlmInvocationLogResp buildInvocationLogResp(LlmInvocationLogDO logDO,
+            LlmConversationDO conversation, List<LlmMessageDO> messages) {
+        boolean semanticModeling = isSemanticModelingConversation(conversation);
         return LlmInvocationLogResp.builder().id(logDO.getId())
                 .conversationId(logDO.getConversationId())
                 .conversationType(conversation == null ? null : conversation.getConversationType())
@@ -478,13 +647,37 @@ public class LlmConversationGatewayService {
                 .promptTokens(logDO.getPromptTokens()).completionTokens(logDO.getCompletionTokens())
                 .totalTokens(logDO.getTotalTokens()).latencyMs(logDO.getLatencyMs())
                 .status(logDO.getStatus()).errorCode(logDO.getErrorCode())
-                .errorMessage(logDO.getErrorMessage()).requestSummary(buildRequestSummary(messages))
-                .rawResponseRef(logDO.getRawResponseRef())
-                .hasReasoningContent(messages.stream()
+                .errorMessage(logDO.getErrorMessage())
+                .requestSummary(semanticModeling ? null : buildRequestSummary(messages))
+                .rawResponseRef(semanticModeling ? null : logDO.getRawResponseRef())
+                .hasReasoningContent(!semanticModeling && messages.stream()
                         .anyMatch(message -> StringUtils.isNotBlank(message.getReasoningContent())))
-                .hasToolCalls(messages.stream()
+                .hasToolCalls(!semanticModeling && messages.stream()
                         .anyMatch(message -> StringUtils.isNotBlank(message.getToolCalls())))
                 .createdAt(logDO.getCreatedAt()).build();
+    }
+
+    /** 判断会话是否包含需要隔离的语义建模上下文。 */
+    private boolean isSemanticModelingConversation(LlmConversationDO conversation) {
+        return conversation != null && SEMANTIC_MODELING_CONVERSATION_TYPE
+                .equalsIgnoreCase(conversation.getConversationType());
+    }
+
+    /** 向建模 Worker 传递不会被 Jackson 序列化的模型原文。 */
+    private String resolveInternalAssistantContent(LlmChatResponse response) {
+        if (StringUtils.isNotBlank(response.getContent())) {
+            return response.getContent();
+        }
+        return response.getParsedJson() == null ? null : response.getParsedJson().toString();
+    }
+
+    /** 生成不包含 Provider 原文的建模调用错误摘要。 */
+    private String buildSafeInvocationError(LlmChatResponse response) {
+        if (LlmConstants.ERROR_JSON_PARSE_FAILED.equals(response.getErrorCode())) {
+            return "LLM returned empty or invalid JSON content";
+        }
+        return StringUtils.isBlank(response.getErrorCode()) ? null
+                : "LLM provider call failed: " + response.getErrorCode();
     }
 
     /**
@@ -495,6 +688,7 @@ public class LlmConversationGatewayService {
             return null;
         }
         String summary = messages.stream()
+                .filter(message -> !isInternalMessage(message))
                 .map(message -> message.getRole() + ": " + truncate(message.getContent()))
                 .reduce((left, right) -> left + "\n" + right).orElse("");
         return truncate(summary);
@@ -527,6 +721,12 @@ public class LlmConversationGatewayService {
                 .toolCallId(message.getToolCallId()).build();
     }
 
+    /** 判断消息是否仅供服务端结构修复使用，禁止出现在公开响应和日志摘要。 */
+    private boolean isInternalMessage(LlmMessageDO message) {
+        return message != null && LlmConstants.CONTENT_TYPE_INTERNAL_JSON_ERROR
+                .equals(message.getContentType());
+    }
+
     /**
      * 校验追加消息请求。
      */
@@ -551,6 +751,28 @@ public class LlmConversationGatewayService {
         return conversation;
     }
 
+    /** 校验会话归属；超级管理员可执行平台级排障。 */
+    private void requireConversationOwner(LlmConversationDO conversation, User user) {
+        String userName = requireUserName(user);
+        if (!isSuperAdmin(user)
+                && !StringUtils.equalsIgnoreCase(conversation.getCreatedBy(), userName)) {
+            throw new InvalidPermissionException("无权访问该 LLM 会话");
+        }
+    }
+
+    /** 返回已认证用户名；Gateway REST 入口不允许匿名访问。 */
+    private String requireUserName(User user) {
+        if (user == null || StringUtils.isBlank(user.getName())) {
+            throw new InvalidPermissionException("请先登录后访问 LLM Gateway");
+        }
+        return user.getName();
+    }
+
+    /** 判断当前用户是否可以执行平台级会话与日志审计。 */
+    private boolean isSuperAdmin(User user) {
+        return user != null && user.isSuperAdmin();
+    }
+
     /**
      * 获取模型配置，不存在则抛错。
      */
@@ -560,6 +782,17 @@ public class LlmConversationGatewayService {
             throw new IllegalArgumentException("Chat model not found: " + chatModelId);
         }
         return chatModel;
+    }
+
+    /** 校验模型对当前用户可见，防止通过猜测 ID 消耗其他用户的 Provider 凭据。 */
+    private ChatModel requireVisibleChatModel(Integer chatModelId, User user) {
+        requireUserName(user);
+        if (isSuperAdmin(user)) {
+            return requireChatModel(chatModelId);
+        }
+        return chatModelService.getChatModels(user).stream()
+                .filter(model -> Objects.equals(model.getId(), chatModelId)).findFirst()
+                .orElseThrow(() -> new InvalidPermissionException("无权使用所选 LLM 模型"));
     }
 
     /**
@@ -667,6 +900,58 @@ public class LlmConversationGatewayService {
             return LlmConstants.INVOCATION_RATE_LIMITED;
         }
         return LlmConstants.INVOCATION_FAILED;
+    }
+
+    /**
+     * 校验模型能力表与 Adapter 真实 JSON 协议能力一致。
+     *
+     * <p>
+     * 模型能力只表示管理员允许使用 JSON；协议如何传递必须由 Adapter 显式声明。严格 Schema
+     * 模式没有 Schema 时无法构造合法请求，因此在调用 Provider 前拒绝。
+     * </p>
+     */
+    private LlmMessageCreateResp validateAdapterJsonOutputMode(Long messageId,
+            LlmMessageCreateReq req, LlmProviderAdapter adapter) {
+        if (!LlmConstants.FORMAT_JSON.equalsIgnoreCase(req.getResponseFormat())) {
+            return null;
+        }
+        LlmJsonOutputMode outputMode = adapter.jsonOutputMode();
+        if (outputMode == null || LlmJsonOutputMode.NONE.equals(outputMode)) {
+            return buildRejectedResp(messageId, LlmConstants.ERROR_JSON_OUTPUT_UNSUPPORTED,
+                    "Current provider adapter does not support JSON output.");
+        }
+        if (LlmJsonOutputMode.JSON_SCHEMA_STRICT.equals(outputMode)
+                && req.getJsonSchema() == null) {
+            return buildRejectedResp(messageId, LlmConstants.ERROR_BAD_REQUEST,
+                    "jsonSchema is required for strict JSON Schema output.");
+        }
+        return null;
+    }
+
+    /** 返回调用日志可检索的请求 ID；Provider 无 ID 时生成兼容的内部 UUID。 */
+    private String resolveRequestId(LlmChatResponse response) {
+        return StringUtils.defaultIfBlank(response.getProviderRequestId(),
+                UUID.randomUUID().toString());
+    }
+
+    /**
+     * 创建固定容量的公平条带锁；公平策略避免同一热点条带中的会话长期饥饿。
+     */
+    private static ReentrantLock[] createConversationLocks() {
+        ReentrantLock[] locks = new ReentrantLock[CONVERSATION_LOCK_STRIPE_COUNT];
+        for (int index = 0; index < locks.length; index++) {
+            locks[index] = new ReentrantLock(true);
+        }
+        return locks;
+    }
+
+    /**
+     * 按会话 ID 稳定选择条带锁；不同会话哈希碰撞时允许保守串行以换取固定内存占用。
+     */
+    private ReentrantLock getConversationLock(Long conversationId) {
+        Objects.requireNonNull(conversationId, "conversationId must not be null");
+        int stripeIndex = Math.floorMod(conversationId.hashCode(), conversationLocks.length);
+        return conversationLocks[stripeIndex];
     }
 
     /**

@@ -1,0 +1,146 @@
+/**
+ * AI 语义建模草稿页面样式。
+ *
+ * 职责：动态计算列表可视高度、保持操作区不换行、详情结构树可滚动、JSON 编辑器可读，
+ * 并让重新生成弹窗、尝试历史、版本快照与不确定项在管理后台布局中稳定展示。
+ */
+.draftTable {
+  :global {
+    // 与语义缺口池保持相同的视口高度策略，避免表格下方出现大块无效空白。
+    .ant-pro-card-body {
+      display: flex;
+      height: calc(100vh - 240px);
+      min-height: 420px;
+      max-height: 680px;
+      overflow: hidden;
+      flex-direction: column;
+    }
+
+    // ProTable 中间包装层都必须传递 flex 高度，表格内容区才能按剩余空间伸缩。
+    .ant-table-wrapper,
+    .ant-spin,
+    .ant-spin-nested-loading,
+    .ant-spin-container {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .ant-table {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      margin-bottom: 5px;
+      flex-direction: column;
+    }
+
+    .ant-table-container {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .ant-table-content {
+      flex: 1;
+      min-height: 0;
+      overflow: auto !important;
+    }
+
+    .ant-table-body {
+      flex: 1;
+      max-height: none !important;
+      overflow-y: auto !important;
+    }
+
+    // 分页固定在动态表格区域底部，少量数据时不会在页面中部悬空。
+    .ant-table-pagination.ant-pagination {
+      margin-top: 0;
+      margin-bottom: 0;
+    }
+
+    .ant-table-cell {
+      vertical-align: middle;
+    }
+  }
+}
+
+.nowrapActions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+// Ant Design 的 disabled Button 不触发鼠标事件，外层包装保证达到重试上限后仍能显示原因。
+.tooltipButtonWrapper {
+  display: inline-flex;
+  white-space: nowrap;
+}
+
+.regenerationModalContent {
+  width: 100%;
+}
+
+.regenerationGoal {
+  margin-bottom: 0 !important;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.attemptList {
+  margin-top: 16px;
+}
+
+.attemptCard {
+  width: 100%;
+}
+
+.attemptTitle {
+  margin-bottom: 12px;
+}
+
+.structureTreeCard {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 250px);
+  overflow: auto;
+}
+
+.workbenchContent {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.jsonEditor {
+  min-height: 560px !important;
+  padding: 12px;
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+.uncertaintyAlert {
+  width: 100%;
+}
+
+.versionSnapshot {
+  margin-top: 24px;
+}
+
+.readonlyJson {
+  max-height: 520px;
+  margin-top: 16px;
+  padding: 16px;
+  overflow: auto;
+  color: rgba(0, 0, 0, 0.88);
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f5f5f5;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+}

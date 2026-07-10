@@ -4,7 +4,7 @@
  * 职责：
  * - 展示 Chat BI 问答失败、LLM SQL 回退和用户负反馈沉淀的语义缺口；
  * - 提供助手、主题域、数据源、失败类型、状态、时间和关键词筛选；
- * - 支持详情查看、忽略、重新打开和阶段 2 AI 建模占位入口。
+ * - 支持详情查看、忽略、重新打开，并跳转阶段 3 草稿页发起 AI 建模。
  *
  * 并发说明：
  * - 忽略和重新打开按钮使用行级 loading 状态，防止重复点击；
@@ -19,6 +19,7 @@ import {
 } from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
+import { history } from '@umijs/max';
 import {
   Button,
   Descriptions,
@@ -35,7 +36,6 @@ import dayjs from 'dayjs';
 import React, { useMemo, useRef, useState } from 'react';
 import styles from './style.less';
 import {
-  createSemanticGapDraft,
   getSemanticGapDetail,
   getSemanticGaps,
   ignoreSemanticGap,
@@ -257,23 +257,14 @@ const SemanticGapPool: React.FC = () => {
   };
 
   /**
-   * 点击阶段 2 草稿占位入口。
+   * 跳转建模草稿页面，并通过 URL 携带当前缺口 ID。
    *
    * @param record 当前表格行。
-   * @returns Promise<void>。
-   * @throws 请求异常会被捕获并展示。
+   * @returns void。
+   * @throws 不抛出异常。
    */
-  const startDraft = async (record: SemanticGapItem) => {
-    setActionLoadingId(record.id);
-    try {
-      const response = await createSemanticGapDraft(record.id);
-      const data = unwrapData(response);
-      message.info(data?.message || '阶段 2 暂未启用 AI 草稿生成');
-    } catch (error) {
-      message.error(getRequestErrorText(error));
-    } finally {
-      setActionLoadingId(undefined);
-    }
+  const startDraft = (record: SemanticGapItem) => {
+    history.push(`/ai-semantic-modeling/drafts?gapId=${encodeURIComponent(record.id)}`);
   };
 
   const columns: ProColumns<SemanticGapItem>[] = useMemo(() => [
