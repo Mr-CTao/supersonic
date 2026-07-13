@@ -162,8 +162,7 @@ class ModelingDraftValidatorTest {
     @Test
     void shouldDeduplicateAliasConflictWithinSameObject() {
         String json = validDraftJson().replace("\"name\": \"订单金额\"", "\"name\": \"冲突名\"")
-                .replace("\"bizName\": \"order_amount_metric\"",
-                        "\"bizName\": \"冲突名\"")
+                .replace("\"bizName\": \"order_amount_metric\"", "\"bizName\": \"冲突名\"")
                 .replace("\"aliases\": [\"营收金额\"]", "\"aliases\": [\"冲突名\"]");
 
         ValidatedDraft result =
@@ -172,8 +171,7 @@ class ModelingDraftValidatorTest {
         assertThat(result.payload().getUncertainties())
                 .filteredOn(uncertainty -> "ALIAS_CONFLICT".equals(uncertainty.getCategory())
                         && "orderAmount".equals(uncertainty.getObjectKey()))
-                .singleElement()
-                .extracting(ModelingDraftPayload.UncertaintyDraft::getReason)
+                .singleElement().extracting(ModelingDraftPayload.UncertaintyDraft::getReason)
                 .isEqualTo("名称或别名与其他草稿对象或现有资产冲突：冲突名");
     }
 
@@ -254,6 +252,25 @@ class ModelingDraftValidatorTest {
             assertThat(uncertainty.getObjectKey()).isEqualTo("orderRegion");
             assertThat(uncertainty.getField()).isEqualTo("status");
         });
+    }
+
+    /** 同一规范化草稿重复校验时，派生不确定项及其 key 必须保持稳定且不继续增长。 */
+    @Test
+    void shouldKeepDerivedUncertaintiesStableAcrossRepeatedValidation() {
+        String json = validDraftJson().replace("\"field\": \"region\"", "\"field\": \"status\"");
+        ValidatedDraft first = validator.validateAndNormalize(json, columnsByTable(), Set.of());
+
+        ValidatedDraft second =
+                validator.validateAndNormalize(first.json(), columnsByTable(), Set.of());
+
+        assertThat(second.payload().getUncertainties())
+                .filteredOn(item -> "UNKNOWN_STATUS".equals(item.getCategory())
+                        && "orderRegion".equals(item.getObjectKey()))
+                .singleElement();
+        assertThat(second.payload().getUncertainties())
+                .extracting(ModelingDraftPayload.UncertaintyDraft::getKey).doesNotHaveDuplicates();
+        assertThat(second.payload().getUncertainties())
+                .hasSameSizeAs(first.payload().getUncertainties());
     }
 
     /** 验证校验器不持有正式资产写服务或事件总线，因而无法产生发布与知识刷新副作用。 */

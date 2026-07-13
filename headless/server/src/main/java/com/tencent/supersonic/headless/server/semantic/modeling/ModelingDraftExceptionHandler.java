@@ -5,6 +5,7 @@ import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.headless.server.rest.SemanticGapController;
 import com.tencent.supersonic.headless.server.rest.SemanticGapModelingDraftController;
 import com.tencent.supersonic.headless.server.rest.SemanticModelingDraftController;
+import com.tencent.supersonic.headless.server.rest.SemanticModelingValidationReportController;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -33,7 +34,8 @@ import java.util.List;
  */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {SemanticModelingDraftController.class,
-                SemanticGapController.class, SemanticGapModelingDraftController.class})
+                SemanticModelingValidationReportController.class, SemanticGapController.class,
+                SemanticGapModelingDraftController.class})
 @Slf4j
 public class ModelingDraftExceptionHandler {
 

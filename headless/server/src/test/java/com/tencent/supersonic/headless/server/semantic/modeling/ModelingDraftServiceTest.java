@@ -30,14 +30,17 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -81,6 +84,9 @@ class ModelingDraftServiceTest {
     private DatabaseService databaseService;
 
     @Mock
+    private ModelingDraftStage4PermissionService writePermissionService;
+
+    @Mock
     private ModelingDraftValidator validator;
 
     @Mock
@@ -96,9 +102,11 @@ class ModelingDraftServiceTest {
     @BeforeEach
     void setUp() {
         properties.setGenerationTimeoutSeconds(GENERATION_TIMEOUT_SECONDS);
+        lenient().when(writePermissionService.requireManageable(anyLong(), any(User.class)))
+                .thenAnswer(invocation -> draftMapper.selectById(invocation.getArgument(0)));
         service = new ModelingDraftService(contextBuilder, store, worker, draftMapper,
-                attemptMapper, versionMapper, databaseService, validator, properties, executor,
-                objectMapper);
+                attemptMapper, versionMapper, databaseService, writePermissionService, validator,
+                properties, executor, objectMapper);
     }
 
     /** 幂等重放必须复用既有 ID，并禁止再次向生成执行器提交任务。 */
@@ -197,8 +205,6 @@ class ModelingDraftServiceTest {
         PreflightSnapshot snapshot = newSnapshot(newGenerateRequest());
 
         when(draftMapper.selectById(DRAFT_ID)).thenReturn(failed, generating);
-        when(databaseService.getDatabase(DATA_SOURCE_ID, user))
-                .thenReturn(DatabaseResp.builder().id(DATA_SOURCE_ID).build());
         when(contextBuilder.preflight(any(ModelingDraftGenerateReq.class), eq(user)))
                 .thenReturn(snapshot);
         when(store.regenerate(eq(failed), eq(0), eq(12), eq(true), eq(retryKey), anyString(), eq(3),
@@ -238,8 +244,6 @@ class ModelingDraftServiceTest {
         request.setChatModelId(12);
         request.setIncludeSampleData(false);
         when(draftMapper.selectById(DRAFT_ID)).thenReturn(failed);
-        when(databaseService.getDatabase(DATA_SOURCE_ID, user))
-                .thenReturn(DatabaseResp.builder().id(DATA_SOURCE_ID).build());
         when(store.findAttemptByIdempotencyKey(user.getName(), retryKey)).thenReturn(attempt);
 
         ModelingDraftResp response = service.regenerate(DRAFT_ID, request, retryKey, user);
@@ -261,9 +265,6 @@ class ModelingDraftServiceTest {
         request.setChatModelId(12);
         request.setIncludeSampleData(false);
         when(draftMapper.selectById(DRAFT_ID)).thenReturn(failed);
-        when(databaseService.getDatabase(DATA_SOURCE_ID, user))
-                .thenReturn(DatabaseResp.builder().id(DATA_SOURCE_ID).build());
-
         ModelingDraftException exception = assertThrows(ModelingDraftException.class,
                 () -> service.regenerate(DRAFT_ID, request, "draft-regenerate-limit", user));
 
@@ -288,6 +289,50 @@ class ModelingDraftServiceTest {
         verify(store).failStaleGenerations(any(Date.class));
     }
 
+    /** 可读取但不可管理的账号必须收到显式只读能力，供前端隐藏阶段 4 写入口。 */
+    @Test
+    void shouldExposeReadOnlyCapabilityOnDraftDetail() {
+        SemanticModelingDraftDO draft = newDraft(ModelingDraftConstants.STATUS_DRAFT);
+        when(draftMapper.selectById(DRAFT_ID)).thenReturn(draft);
+        when(databaseService.getDatabase(DATA_SOURCE_ID, user))
+                .thenReturn(DatabaseResp.builder().id(DATA_SOURCE_ID).build());
+        when(writePermissionService.canManage(draft, user)).thenReturn(false);
+
+        ModelingDraftResp response = service.get(DRAFT_ID, user);
+
+        assertFalse(response.getCanManage());
+        verify(writePermissionService).canManage(draft, user);
+    }
+
+    /** 保存已经通过管理权限校验，成功响应必须继续携带 canManage=true，避免前端瞬时降为只读。 */
+    @Test
+    void shouldKeepManageCapabilityAfterManualSave() {
+        SemanticModelingDraftDO draft = newDraft(ModelingDraftConstants.STATUS_DRAFT);
+        SemanticModelingDraftDO saved = newDraft(ModelingDraftConstants.STATUS_DRAFT);
+        saved.setCurrentVersionNo(2);
+        saved.setLockVersion(1);
+        saved.setDraftJson("{\"schemaVersion\":\"1.0\"}");
+        ModelingDraftSaveReq request = new ModelingDraftSaveReq();
+        request.setLockVersion(0);
+        request.setCurrentDraft(objectMapper.createObjectNode().put("schemaVersion", "1.0"));
+        ValidationContext validationContext = new ValidationContext(Map.of(), Set.of());
+        ValidatedDraft validated = new ValidatedDraft(null, saved.getDraftJson());
+
+        when(writePermissionService.requireManageable(DRAFT_ID, user)).thenReturn(draft);
+        when(contextBuilder.reloadValidationContext(DATA_SOURCE_ID, "catalog", "warehouse",
+                List.of("orders"), null, user)).thenReturn(validationContext);
+        when(validator.validateAndNormalize(anyString(), eq(Map.of()), eq(Set.of())))
+                .thenReturn(validated);
+        when(store.saveVersion(draft, 0, validated.json(), null, user)).thenReturn(saved);
+
+        ModelingDraftResp response = service.save(DRAFT_ID, request, user);
+
+        assertTrue(response.getCanManage());
+        assertEquals(2, response.getCurrentVersionNo());
+        verify(writePermissionService).requireManageable(DRAFT_ID, user);
+        verify(writePermissionService, never()).canManage(any(), any());
+    }
+
     /** 人工保存必须原样传播存储层 409，禁止静默覆盖其他管理员的新版本。 */
     @Test
     void shouldPropagateOptimisticLockConflictFromManualSave() {
@@ -301,8 +346,6 @@ class ModelingDraftServiceTest {
                 ModelingDraftConstants.ERROR_CONFLICT, "草稿已被其他操作更新，请重新加载后再保存");
 
         when(draftMapper.selectById(DRAFT_ID)).thenReturn(draft);
-        when(databaseService.getDatabase(DATA_SOURCE_ID, user))
-                .thenReturn(DatabaseResp.builder().id(DATA_SOURCE_ID).build());
         when(contextBuilder.reloadValidationContext(DATA_SOURCE_ID, "catalog", "warehouse",
                 List.of("orders"), null, user)).thenReturn(validationContext);
         when(validator.validateAndNormalize(anyString(), eq(Map.of()), eq(Set.of())))

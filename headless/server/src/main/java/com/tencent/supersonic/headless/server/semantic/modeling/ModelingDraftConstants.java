@@ -6,7 +6,7 @@ import java.util.Set;
  * AI 语义建模草稿模块常量。
  *
  * <p>
- * 职责说明：集中定义阶段 3 状态、来源、允许的指标聚合和错误码，避免业务逻辑散落魔法字符串。 本类只包含不可变常量，不持有共享可变状态，因此无需额外并发保护。
+ * 职责说明：集中定义阶段 3 草稿与阶段 4 校准、验证门禁使用的状态、来源、允许的指标聚合和错误码， 避免业务逻辑散落魔法字符串。本类只包含不可变常量，不持有共享可变状态，因此无需额外并发保护。
  * </p>
  */
 public final class ModelingDraftConstants {
@@ -17,6 +17,7 @@ public final class ModelingDraftConstants {
     public static final String STATUS_GENERATING = "GENERATING";
     public static final String STATUS_DRAFT = "DRAFT";
     public static final String STATUS_GENERATION_FAILED = "GENERATION_FAILED";
+    public static final String STATUS_PENDING_APPROVAL = "PENDING_APPROVAL";
 
     public static final String ATTEMPT_TRIGGER_INITIAL = "INITIAL";
     public static final String ATTEMPT_TRIGGER_MANUAL_REGENERATION = "MANUAL_REGENERATION";
@@ -33,7 +34,20 @@ public final class ModelingDraftConstants {
     public static final String FAILURE_STAGE_TIMEOUT = "TIMEOUT";
 
     public static final String VERSION_AI_GENERATED = "AI_GENERATED";
+    public static final String VERSION_AI_REVISED = "AI_REVISED";
+    public static final String VERSION_RESTORED = "RESTORED";
     public static final String VERSION_MANUAL_SAVE = "MANUAL_SAVE";
+
+    public static final String VALIDATION_RUNNING = "RUNNING";
+    public static final String VALIDATION_PASSED = "PASSED";
+    public static final String VALIDATION_WARNING = "WARNING";
+    public static final String VALIDATION_FAILED = "FAILED";
+    public static final String VALIDATION_NOT_RUN = "NOT_RUN";
+    public static final String VALIDATION_SYSTEM_FAILED = "SYSTEM_FAILED";
+
+    public static final String FINDING_BLOCKING = "BLOCKING";
+    public static final String FINDING_WARNING = "WARNING";
+    public static final String FINDING_INFO = "INFO";
 
     public static final String ERROR_INVALID_REQUEST = "INVALID_REQUEST";
     public static final String ERROR_ACCESS_DENIED = "ACCESS_DENIED";
@@ -48,6 +62,17 @@ public final class ModelingDraftConstants {
     public static final String ERROR_OUTPUT_INVALID = "MODEL_OUTPUT_INVALID";
     public static final String ERROR_PROVIDER = "MODEL_PROVIDER_FAILED";
     public static final String ERROR_GENERATION_TIMEOUT = "GENERATION_TIMEOUT";
+    public static final String ERROR_VALIDATION_RUNNING = "VALIDATION_ALREADY_RUNNING";
+    public static final String ERROR_VALIDATION_STALE_RECOVERED = "VALIDATION_RECOVERED_AS_STALE";
+    public static final String ERROR_VALIDATION_FAILED = "VALIDATION_GATE_FAILED";
+    public static final String ERROR_SUBMISSION_CONFLICT = "SUBMISSION_CONFLICT";
+    public static final String ERROR_REVISION_FAILED = "AI_REVISION_FAILED";
+    public static final String ERROR_REVISION_RUNNING = "REVISION_RUNNING";
+    public static final String ERROR_REVISION_ATTEMPT_TERMINAL = "REVISION_ATTEMPT_TERMINAL";
+    public static final String ERROR_REVISION_LEASE_EXPIRED = "REVISION_LEASE_EXPIRED";
+    public static final String ERROR_REVISION_BASE_VERSION_CHANGED =
+            "REVISION_BASE_VERSION_CHANGED";
+    public static final String ERROR_SENSITIVE_INSTRUCTION = "SENSITIVE_REVISION_INSTRUCTION";
     public static final String ERROR_INTERNAL = "INTERNAL_ERROR";
 
     public static final String SCHEMA_VERSION = "1.0";

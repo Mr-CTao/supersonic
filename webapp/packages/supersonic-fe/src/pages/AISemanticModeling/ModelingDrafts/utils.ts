@@ -10,10 +10,15 @@
  * - 所有函数均为无副作用纯函数，不访问共享状态，不需要并发保护。
  */
 import type { DataNode } from 'antd/es/tree';
+import { MODELING_DRAFT_REVISION_INSTRUCTION_MAX_LENGTH } from '@/services/semanticModelingDraft';
 import type {
   ModelingDraftAttempt,
   ModelingDraftItem,
+  ModelingDraftStatus,
+  ModelingDraftVersionDiff,
   ModelingValidationIssue,
+  ModelingValidationItem,
+  ModelingValidationReport,
   SelectedTable,
   SemanticModelingDraftJson,
 } from '@/services/semanticModelingDraft';
@@ -30,6 +35,47 @@ export type RegenerationAvailability = {
   allowed: boolean;
   reason: string;
 };
+
+export type ModelingSubmitGateState = {
+  allowed: boolean;
+  reason: string;
+};
+
+export type ModelingSubmitGateInput = {
+  draftStatus?: ModelingDraftStatus;
+  currentVersionNo?: number;
+  dirty: boolean;
+  busy?: boolean;
+  report?: ModelingValidationReport;
+};
+
+/** 阶段 4 服务端固定十项必需检查；顺序与报告展示保持一致。 */
+export const MODELING_REQUIRED_VALIDATION_CHECKS = [
+  'JSON_SCHEMA',
+  'TABLE_FIELD_EXISTENCE',
+  'METRIC_EXPRESSION_FIELD',
+  'SENSITIVE_FIELD',
+  'NAME_CONFLICT',
+  'RETRIEVAL_POLLUTION',
+  'SAMPLE_QUESTION',
+  'SEMANTIC_SQL_GENERATION',
+  'SQL_READ_ONLY',
+  'PERFORMANCE_RISK',
+] as const;
+
+export type ModelingRevisionFailureDisposition = {
+  baseVersionConflict: boolean;
+  errorCode?: string;
+  reuseIdempotencyKey: boolean;
+  serverResponded: boolean;
+};
+
+const REVISION_RUNNING_ERROR_CODE = 'REVISION_RUNNING';
+const REVISION_BASE_CONFLICT_ERROR_CODES = new Set([
+  'LOCK_VERSION_CONFLICT',
+  'REVISION_BASE_VERSION_CHANGED',
+  'REVISION_BASE_VERSION_CONFLICT',
+]);
 
 /**
  * 解包 Supersonic 统一响应中的业务数据。
@@ -76,6 +122,67 @@ export function getRequestErrorText(error: any): string {
     error?.message ||
     '请求失败，请检查后端服务、权限或网络连接'
   );
+}
+
+/**
+ * 从统一错误包装或 umi-request 异常中提取稳定业务错误码。
+ *
+ * @param error 请求异常。
+ * @returns 优先返回内层业务错误码；只有 HTTP 数字码时返回 undefined。
+ * @throws 不抛出异常。
+ */
+export function getRequestErrorCode(error: any): string | undefined {
+  const candidates = [
+    error?.data?.data?.code,
+    error?.response?.data?.data?.code,
+    error?.data?.errorCode,
+    error?.response?.data?.errorCode,
+    error?.data?.code,
+    error?.response?.data?.code,
+    error?.errorCode,
+    error?.code,
+  ];
+  return candidates.find(
+    (candidate) => typeof candidate === 'string' && !/^\d+$/.test(candidate.trim()),
+  );
+}
+
+/**
+ * 判断异常是否来自已建立的 HTTP 响应，而不是断网、超时或连接被重置。
+ *
+ * @param error 请求异常。
+ * @returns 存在 Response 或有效 HTTP 状态码时返回 true。
+ * @throws 不抛出异常。
+ */
+export function hasServerResponse(error: any): boolean {
+  if (error?.response) return true;
+  const statusCandidates = [error?.status, error?.data?.status, error?.data?.code, error?.code];
+  return statusCandidates.some((candidate) => {
+    const status = Number(candidate);
+    return Number.isInteger(status) && status >= 100 && status <= 599;
+  });
+}
+
+/**
+ * 决定 AI 修订失败后是否复用原始幂等键和基线版本。
+ *
+ * @param error umi-request 异常或统一错误响应。
+ * @returns 无响应或 REVISION_RUNNING 时复用；其余服务端终态响应创建新业务请求。
+ * @throws 不抛出异常。
+ */
+export function getModelingRevisionFailureDisposition(
+  error: any,
+): ModelingRevisionFailureDisposition {
+  const errorCode = getRequestErrorCode(error);
+  const serverResponded = hasServerResponse(error);
+  return {
+    baseVersionConflict: Boolean(
+      serverResponded && errorCode && REVISION_BASE_CONFLICT_ERROR_CODES.has(errorCode),
+    ),
+    errorCode,
+    reuseIdempotencyKey: !serverResponded || errorCode === REVISION_RUNNING_ERROR_CODE,
+    serverResponded,
+  };
 }
 
 /**
@@ -320,5 +427,239 @@ export function parseValidationIssues(
       .filter((item) => item.path || item.code || item.message);
   } catch (_error) {
     return [];
+  }
+}
+
+/**
+ * 将验证报告阻塞项或警告项归一化为安全、有限的展示对象。
+ *
+ * @param input 后端结构化数组、字符串数组或兼容 JSON 字符串。
+ * @returns 最多 100 个仅含稳定分类、路径、消息、严重级别和模型 key 的问题对象。
+ * @throws 不抛出异常；无法识别的对象和非法 JSON 会被忽略。
+ */
+export function normalizeModelingValidationItems(input: unknown): ModelingValidationItem[] {
+  let values: unknown = input;
+  if (typeof input === 'string') {
+    try {
+      const parsed = JSON.parse(input);
+      values = Array.isArray(parsed) ? parsed : [input];
+    } catch (_error) {
+      values = [input];
+    }
+  }
+  if (values && typeof values === 'object' && !Array.isArray(values)) {
+    values = [values];
+  }
+  if (!Array.isArray(values)) return [];
+  return values
+    .slice(0, 100)
+    .map((item): ModelingValidationItem | undefined => {
+      if (typeof item === 'string') return { message: item.slice(0, 1000) };
+      if (!item || typeof item !== 'object') return undefined;
+      const value = item as Record<string, unknown>;
+      const text = (key: string) =>
+        typeof value[key] === 'string' ? String(value[key]).slice(0, 1000) : undefined;
+      const normalized = {
+        path: text('path'),
+        code: text('code'),
+        category: text('category') || text('type'),
+        message: text('message') || text('description') || text('reason') || text('title'),
+        detail: text('detail') || text('suggestion'),
+        severity: text('severity'),
+        modelKey: text('modelKey'),
+        objectType: text('objectType'),
+        objectKey: text('objectKey'),
+        blocking: typeof value.blocking === 'boolean' ? value.blocking : undefined,
+      };
+      // 未知结构仍代表后端返回了一项门禁结果；宁可阻塞并提示复核，也不能静默放行。
+      return normalized.path ||
+        normalized.code ||
+        normalized.category ||
+        normalized.message ||
+        normalized.detail ||
+        normalized.severity ||
+        normalized.modelKey
+        ? normalized
+        : { message: '存在未识别的校验项，请查看后端日志或刷新报告', blocking: true };
+    })
+    .filter((item): item is ModelingValidationItem =>
+      Boolean(item && (item.path || item.code || item.category || item.message || item.detail)),
+    );
+}
+
+/**
+ * 返回验证报告中缺失、重复、NOT_RUN、失败、空状态或未知状态的必需检查 ID。
+ *
+ * @param report 当前版本验证报告。
+ * @returns 不完整检查 ID；历史报告缺少集合时返回全部十项。
+ * @throws 不抛出异常，非数组结构按全部不完整处理。
+ */
+export function getIncompleteRequiredValidationChecks(report?: ModelingValidationReport): string[] {
+  if (!Array.isArray(report?.requiredCheckResults)) {
+    return [...MODELING_REQUIRED_VALIDATION_CHECKS];
+  }
+  const completedStatuses = new Set(['PASSED', 'WARNING']);
+  return MODELING_REQUIRED_VALIDATION_CHECKS.filter((checkId) => {
+    const matches = report.requiredCheckResults!.filter(
+      (result) => String(result?.category || '').toUpperCase() === checkId,
+    );
+    if (matches.length !== 1) return true;
+    return !completedStatuses.has(String(matches[0]?.status || '').toUpperCase());
+  });
+}
+
+/**
+ * 判断详情响应是否明确授予草稿写权限。
+ *
+ * @param detail 当前草稿详情；加载中或缺少 canManage 时按只读处理。
+ * @returns 仅 canManage === true 时返回 true。
+ * @throws 不抛出异常。
+ */
+export function hasModelingManagePermission(detail?: ModelingDraftItem): boolean {
+  return detail?.canManage === true;
+}
+
+/**
+ * 计算“提交审批”按钮的前端展示门禁。
+ *
+ * @param input 草稿状态、当前版本、本地脏状态、忙状态和最新验证报告。
+ * @returns allowed 为 false 时 reason 可直接用于按钮 Tooltip；服务端仍必须独立复核。
+ * @throws 不抛出异常。
+ */
+export function getModelingSubmitGateState(
+  input: ModelingSubmitGateInput,
+): ModelingSubmitGateState {
+  const { busy, currentVersionNo, dirty, draftStatus, report } = input;
+  if (draftStatus === 'PENDING_APPROVAL') {
+    return { allowed: false, reason: '当前草稿已经提交审批' };
+  }
+  if (draftStatus !== 'DRAFT') {
+    return { allowed: false, reason: '仅草稿状态可以提交审批' };
+  }
+  if (dirty) {
+    return { allowed: false, reason: '请先保存当前修改并重新执行验证' };
+  }
+  if (busy) {
+    return { allowed: false, reason: '当前操作尚未完成，请稍候' };
+  }
+  if (!Number.isInteger(currentVersionNo) || Number(currentVersionNo) <= 0) {
+    return { allowed: false, reason: '当前草稿版本无效，请重新加载' };
+  }
+  if (!report) {
+    return { allowed: false, reason: '请先对当前版本执行验证' };
+  }
+  if (Number(report.draftVersionNo) !== Number(currentVersionNo)) {
+    return { allowed: false, reason: '验证报告属于旧版本，请重新验证当前版本' };
+  }
+  const incompleteChecks = getIncompleteRequiredValidationChecks(report);
+  if (incompleteChecks.length > 0) {
+    return {
+      allowed: false,
+      reason: `验证报告必需检查未完成：${incompleteChecks.join('、')}`,
+    };
+  }
+  if (report.canSubmit !== true) {
+    return {
+      allowed: false,
+      reason: report.submissionBlockReason || '服务端报告快照不允许提交审批',
+    };
+  }
+  if (report.status === 'RUNNING') {
+    return { allowed: false, reason: '当前版本仍在验证中' };
+  }
+  if (report.status === 'FAILED') {
+    return { allowed: false, reason: '验证失败，请先修复阻塞项' };
+  }
+  if (report.status === 'SYSTEM_FAILED') {
+    return { allowed: false, reason: '验证任务异常，请重新执行验证' };
+  }
+  if (!['PASSED', 'WARNING'].includes(report.status)) {
+    return { allowed: false, reason: '验证报告状态不允许提交审批' };
+  }
+  if (normalizeModelingValidationItems(report.blockingItems).length > 0) {
+    return { allowed: false, reason: '验证报告仍包含阻塞项' };
+  }
+  return {
+    allowed: true,
+    reason: report.status === 'WARNING' ? '验证包含警告，确认后可提交审批' : '验证已通过',
+  };
+}
+
+/**
+ * 将验证阻塞项转换为可编辑的 AI 修订指令。
+ *
+ * @param input 验证报告或阻塞项集合。
+ * @returns 有界的自然语言修订指令；无有效阻塞项时返回空字符串。
+ * @throws 不抛出异常。
+ *
+ * @example
+ * buildValidationRepairInstruction([{ code: 'UNKNOWN_FIELD', message: '字段不存在' }]);
+ */
+export function buildValidationRepairInstruction(
+  input: ModelingValidationReport | ModelingValidationReport['blockingItems'],
+): string {
+  const rawItems =
+    input && typeof input === 'object' && !Array.isArray(input) && 'blockingItems' in input
+      ? input.blockingItems
+      : input;
+  const items = normalizeModelingValidationItems(rawItems).slice(0, 20);
+  if (!items.length) return '';
+  const lines = items.map((item, index) => {
+    const location = [item.path, item.code, item.category].filter(Boolean).join(' · ');
+    const detail = item.message || item.detail || '请修复该阻塞项';
+    return `${index + 1}. ${location ? `[${location}] ` : ''}${detail}`;
+  });
+  const instruction = [
+    '请修复以下验证阻塞项，并保持其他已经确认的语义对象和业务口径不变：',
+    ...lines,
+    '修订后请返回完整结构化草稿；无法确认的业务口径请继续保留为不确定项。',
+  ].join('\n');
+  if (instruction.length <= MODELING_DRAFT_REVISION_INSTRUCTION_MAX_LENGTH) return instruction;
+  const suffix = '\n…其余阻塞项请在验证报告中继续复核。';
+  return `${instruction.slice(
+    0,
+    MODELING_DRAFT_REVISION_INSTRUCTION_MAX_LENGTH - suffix.length,
+  )}${suffix}`;
+}
+
+/**
+ * 校验版本差异响应是否仍属于当前草稿和所选版本对。
+ *
+ * @param diff 服务端返回的差异响应。
+ * @param draftId 当前草稿 ID。
+ * @param fromVersionNo 当前起始版本号。
+ * @param toVersionNo 当前目标版本号。
+ * @returns 三个标识均一致时返回 true，防止迟到响应覆盖新选择。
+ * @throws 不抛出异常。
+ */
+export function isModelingVersionDiffForSelection(
+  diff: ModelingDraftVersionDiff | undefined,
+  draftId: number,
+  fromVersionNo?: number,
+  toVersionNo?: number,
+): boolean {
+  return Boolean(
+    diff &&
+      Number(diff.draftId) === Number(draftId) &&
+      Number(diff.fromVersionNo) === Number(fromVersionNo) &&
+      Number(diff.toVersionNo) === Number(toVersionNo),
+  );
+}
+
+/**
+ * 将差异值转换为有界的只读文本，避免超大对象拖慢管理页面。
+ *
+ * @param value 差异前值或后值。
+ * @returns 最多 2000 字符的 JSON/文本。
+ * @throws 不抛出异常；循环引用回退为占位符。
+ */
+export function formatModelingDiffValue(value: unknown): string {
+  if (value === undefined) return '-';
+  if (value === null) return 'null';
+  try {
+    const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    return text.length > 2000 ? `${text.slice(0, 2000)}…` : text;
+  } catch (_error) {
+    return '[无法展示的复杂值]';
   }
 }

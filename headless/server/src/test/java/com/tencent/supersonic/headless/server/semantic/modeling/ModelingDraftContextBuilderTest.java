@@ -100,7 +100,8 @@ class ModelingDraftContextBuilderTest {
         properties = new SemanticModelingProperties();
         contextBuilder = new ModelingDraftContextBuilder(new ObjectMapper(), databaseService,
                 gapMapper, gatewayService, domainService, modelService, dimensionService,
-                metricService, termService, properties);
+                metricService, termService, properties,
+                new SemanticModelingSensitivityClassifier());
     }
 
     /** 数据源 ACL 拒绝时必须在读取模型能力、表元数据和样例之前终止。 */

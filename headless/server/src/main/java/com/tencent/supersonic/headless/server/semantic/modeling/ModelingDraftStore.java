@@ -40,6 +40,7 @@ public class ModelingDraftStore {
     private final SemanticModelingDraftVersionMapper versionMapper;
     private final SemanticGapMapper gapMapper;
     private final ObjectMapper objectMapper;
+    private final ModelingDraftRevisionStore revisionStore;
 
     /**
      * 创建存储服务。
@@ -49,16 +50,18 @@ public class ModelingDraftStore {
      * @param versionMapper 版本 Mapper。
      * @param gapMapper 缺口 Mapper。
      * @param objectMapper JSON 序列化器。
+     * @param revisionStore AI 修订租约存储服务。
      */
     public ModelingDraftStore(SemanticModelingDraftMapper draftMapper,
             SemanticModelingDraftAttemptMapper attemptMapper,
             SemanticModelingDraftVersionMapper versionMapper, SemanticGapMapper gapMapper,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper, ModelingDraftRevisionStore revisionStore) {
         this.draftMapper = draftMapper;
         this.attemptMapper = attemptMapper;
         this.versionMapper = versionMapper;
         this.gapMapper = gapMapper;
         this.objectMapper = objectMapper;
+        this.revisionStore = revisionStore;
     }
 
     /**
@@ -103,7 +106,8 @@ public class ModelingDraftStore {
                             .eq(SemanticModelingDraftDO::getSourceId, request.getSourceId())
                             .in(SemanticModelingDraftDO::getStatus,
                                     ModelingDraftConstants.STATUS_GENERATING,
-                                    ModelingDraftConstants.STATUS_DRAFT)
+                                    ModelingDraftConstants.STATUS_DRAFT,
+                                    ModelingDraftConstants.STATUS_PENDING_APPROVAL)
                             .last("LIMIT 1"));
             if (active != null) {
                 return new CreateResult(active, true);
@@ -253,7 +257,8 @@ public class ModelingDraftStore {
                             .ne(SemanticModelingDraftDO::getId, current.getId())
                             .in(SemanticModelingDraftDO::getStatus,
                                     ModelingDraftConstants.STATUS_GENERATING,
-                                    ModelingDraftConstants.STATUS_DRAFT)
+                                    ModelingDraftConstants.STATUS_DRAFT,
+                                    ModelingDraftConstants.STATUS_PENDING_APPROVAL)
                             .last("LIMIT 1"));
             if (otherActive != null) {
                 throw new ModelingDraftException(HttpStatus.CONFLICT,
@@ -550,6 +555,8 @@ public class ModelingDraftStore {
     @Transactional(rollbackFor = Exception.class)
     public SemanticModelingDraftDO saveVersion(SemanticModelingDraftDO draft,
             Integer expectedLockVersion, String draftJson, String changeSummary, User user) {
+        // 人工保存和 AI 修订都写草稿主记录；先锁 draft 再读 attempt，避免跨实例产生并行版本分叉。
+        revisionStore.assertNoActiveRevision(draft.getId(), user);
         int nextVersionNo = draft.getCurrentVersionNo() + 1;
         Date now = new Date();
         int updated = draftMapper.updateDraftWithVersion(draft.getId(), expectedLockVersion,
@@ -671,7 +678,8 @@ public class ModelingDraftStore {
                             .in(SemanticModelingDraftDO::getSourceId, updatedGapIds)
                             .in(SemanticModelingDraftDO::getStatus,
                                     ModelingDraftConstants.STATUS_GENERATING,
-                                    ModelingDraftConstants.STATUS_DRAFT))
+                                    ModelingDraftConstants.STATUS_DRAFT,
+                                    ModelingDraftConstants.STATUS_PENDING_APPROVAL))
                     .stream().map(SemanticModelingDraftDO::getSourceId).filter(Objects::nonNull)
                     .collect(java.util.stream.Collectors.toSet());
             List<Long> recoverableGapIds =

@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.server.semantic.modeling;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
@@ -38,6 +40,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -72,6 +76,9 @@ class ModelingDraftStoreTest {
     @Mock
     private SemanticGapMapper gapMapper;
 
+    @Mock
+    private ModelingDraftRevisionStore revisionStore;
+
     @Captor
     private ArgumentCaptor<LambdaUpdateWrapper<SemanticModelingDraftDO>> draftUpdateCaptor;
 
@@ -104,7 +111,7 @@ class ModelingDraftStoreTest {
     @BeforeEach
     void setUp() {
         store = new ModelingDraftStore(draftMapper, attemptMapper, versionMapper, gapMapper,
-                objectMapper);
+                objectMapper, revisionStore);
     }
 
     /** 同一 Gap 已存在活动草稿时必须复用该记录，不得再插入草稿或重复改变 Gap 状态。 */
@@ -113,7 +120,7 @@ class ModelingDraftStoreTest {
         ModelingDraftGenerateReq request = newGapRequest();
         SemanticGapDO lockedGap = newGap(SemanticGapStatus.PENDING_ANALYSIS);
         SemanticModelingDraftDO activeDraft =
-                newDraft(ModelingDraftConstants.STATUS_GENERATING, 0, 0);
+                newDraft(ModelingDraftConstants.STATUS_PENDING_APPROVAL, 2, 3);
         when(draftMapper.selectByIdempotencyKey(user.getName(), IDEMPOTENCY_KEY)).thenReturn(null);
         when(gapMapper.selectByIdForUpdate(GAP_ID)).thenReturn(lockedGap);
         when(draftMapper.selectOne(any())).thenReturn(activeDraft);
@@ -123,6 +130,12 @@ class ModelingDraftStoreTest {
         assertSame(activeDraft, result.draft());
         assertTrue(result.replay());
         verify(gapMapper).selectByIdForUpdate(GAP_ID);
+        ArgumentCaptor<LambdaQueryWrapper<SemanticModelingDraftDO>> activeQueryCaptor =
+                ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(draftMapper).selectOne(activeQueryCaptor.capture());
+        activeQueryCaptor.getValue().getSqlSegment();
+        assertTrue(activeQueryCaptor.getValue().getParamNameValuePairs()
+                .containsValue(ModelingDraftConstants.STATUS_PENDING_APPROVAL));
         verify(draftMapper, never()).insert(any(SemanticModelingDraftDO.class));
         verify(gapMapper, never()).updateById(any(SemanticGapDO.class));
     }
@@ -190,6 +203,10 @@ class ModelingDraftStoreTest {
         assertEquals(ModelingDraftConstants.VERSION_MANUAL_SAVE, version.getChangeSource());
         assertEquals("补充订单状态维度", version.getChangeSummary());
         assertEquals(CONVERSATION_ID, version.getLlmConversationId());
+        InOrder lockOrder = inOrder(revisionStore, draftMapper);
+        lockOrder.verify(revisionStore).assertNoActiveRevision(DRAFT_ID, user);
+        lockOrder.verify(draftMapper).updateDraftWithVersion(eq(DRAFT_ID), eq(4), eq(DRAFT_JSON),
+                eq(2), eq(user.getName()), any(Date.class));
     }
 
     /** 旧 lockVersion 条件更新失败时必须返回 409，且不得插入孤立版本快照。 */
@@ -206,6 +223,23 @@ class ModelingDraftStoreTest {
         assertEquals(ModelingDraftConstants.ERROR_CONFLICT, exception.getErrorCode());
         verify(versionMapper, never()).insert(any(SemanticModelingDraftVersionDO.class));
         verify(draftMapper, never()).selectById(DRAFT_ID);
+    }
+
+    /** 活动 AI 修订必须在乐观更新前阻止人工保存，避免同一基线产生两个版本。 */
+    @Test
+    void shouldRejectManualSaveWhileAiRevisionIsRunning() {
+        SemanticModelingDraftDO current = newDraft(ModelingDraftConstants.STATUS_DRAFT, 1, 4);
+        doThrow(new ModelingDraftException(HttpStatus.CONFLICT,
+                ModelingDraftConstants.ERROR_REVISION_RUNNING, "AI 正在修订")).when(revisionStore)
+                        .assertNoActiveRevision(DRAFT_ID, user);
+
+        ModelingDraftException exception = assertThrows(ModelingDraftException.class,
+                () -> store.saveVersion(current, 4, DRAFT_JSON, null, user));
+
+        assertEquals(ModelingDraftConstants.ERROR_REVISION_RUNNING, exception.getErrorCode());
+        verify(draftMapper, never()).updateDraftWithVersion(any(), any(), any(), any(), any(),
+                any());
+        verify(versionMapper, never()).insert(any(SemanticModelingDraftVersionDO.class));
     }
 
     /** 超时批处理必须把所有命中草稿标记失败，并仅将 Gap 来源记录回退为待分析。 */
@@ -252,7 +286,7 @@ class ModelingDraftStoreTest {
         SemanticModelingDraftDO staleGapDraft =
                 newDraft(ModelingDraftConstants.STATUS_GENERATING, 0, 0);
         SemanticModelingDraftDO activeGapDraft =
-                newDraft(ModelingDraftConstants.STATUS_GENERATING, 0, 0);
+                newDraft(ModelingDraftConstants.STATUS_PENDING_APPROVAL, 2, 3);
         activeGapDraft.setId(103L);
         when(draftMapper.selectList(any())).thenReturn(List.of(staleGapDraft),
                 List.of(activeGapDraft));
@@ -262,6 +296,14 @@ class ModelingDraftStoreTest {
         int recovered = store.failStaleGenerations(new Date());
 
         assertEquals(1, recovered);
+        ArgumentCaptor<LambdaQueryWrapper<SemanticModelingDraftDO>> draftQueryCaptor =
+                ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(draftMapper, times(2)).selectList(draftQueryCaptor.capture());
+        LambdaQueryWrapper<SemanticModelingDraftDO> activeQuery =
+                draftQueryCaptor.getAllValues().get(1);
+        activeQuery.getSqlSegment();
+        assertTrue(activeQuery.getParamNameValuePairs()
+                .containsValue(ModelingDraftConstants.STATUS_PENDING_APPROVAL));
         verify(gapMapper).selectByIdsForUpdate(List.of(GAP_ID));
         verify(gapMapper, never()).update(isNull(), any());
     }

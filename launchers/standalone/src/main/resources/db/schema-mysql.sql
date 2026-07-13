@@ -292,7 +292,7 @@ CREATE TABLE IF NOT EXISTS `s2_semantic_modeling_draft` (
     `llm_conversation_id` bigint DEFAULT NULL COMMENT '阶段1本地LLM会话ID',
     `include_sample` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否使用服务端脱敏样例数据',
     `idempotency_key` varchar(128) NOT NULL COMMENT '创建请求幂等键',
-    `status` varchar(32) NOT NULL COMMENT '生成状态：GENERATING、DRAFT或GENERATION_FAILED',
+    `status` varchar(32) NOT NULL COMMENT '草稿状态：GENERATING、DRAFT、GENERATION_FAILED或PENDING_APPROVAL',
     `current_version_no` int NOT NULL DEFAULT 0 COMMENT '当前不可变快照版本号；生成完成前为0',
     `current_attempt_no` int NOT NULL DEFAULT 1 COMMENT '当前生成尝试序号；首次生成固定为1',
     `lock_version` int NOT NULL DEFAULT 0 COMMENT '编辑保存使用的乐观锁版本',
@@ -303,6 +303,11 @@ CREATE TABLE IF NOT EXISTS `s2_semantic_modeling_draft` (
     `repaired_output` mediumtext DEFAULT NULL COMMENT '一次修复后的LLM输出，仅后端诊断使用',
     `error_code` varchar(64) DEFAULT NULL COMMENT '脱敏后的统一错误码',
     `error_message` varchar(1500) DEFAULT NULL COMMENT '脱敏后的错误摘要',
+    `submitted_validation_report_id` bigint DEFAULT NULL COMMENT '阶段4提交待审批时绑定的验证报告ID',
+    `submission_idempotency_key` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL
+        COMMENT '提交待审批请求幂等键（大小写敏感）',
+    `submitted_by` varchar(100) DEFAULT NULL COMMENT '提交待审批人',
+    `submitted_at` datetime DEFAULT NULL COMMENT '提交待审批时间',
     `created_by` varchar(100) NOT NULL COMMENT '创建人',
     `created_at` datetime NOT NULL COMMENT '创建时间',
     `updated_by` varchar(100) NOT NULL COMMENT '最近更新人',
@@ -351,14 +356,80 @@ CREATE TABLE IF NOT EXISTS `s2_semantic_modeling_draft_version` (
     `draft_id` bigint NOT NULL COMMENT '所属草稿ID',
     `version_no` int NOT NULL COMMENT '草稿内单调递增版本号',
     `draft_json` mediumtext NOT NULL COMMENT '该版本的不可变结构化草稿JSON快照',
-    `change_source` varchar(32) NOT NULL COMMENT '变更来源：AI_GENERATED或MANUAL_SAVE',
+    `change_source` varchar(32) NOT NULL COMMENT '变更来源：AI_GENERATED、MANUAL_SAVE或AI_REVISED',
     `change_summary` varchar(1000) DEFAULT NULL COMMENT '版本变更摘要',
     `llm_conversation_id` bigint DEFAULT NULL COMMENT '生成该版本时关联的阶段1本地LLM会话ID',
+    `request_idempotency_key` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL
+        COMMENT '创建该版本的请求幂等键（大小写敏感）',
+    `request_fingerprint` varchar(128) DEFAULT NULL COMMENT '幂等请求规范化参数指纹',
+    `result_lock_version` int DEFAULT NULL COMMENT 'RESTORED首次成功响应的草稿锁版本',
     `created_by` varchar(100) NOT NULL COMMENT '版本创建人',
     `created_at` datetime NOT NULL COMMENT '版本创建时间',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_semantic_draft_version` (`draft_id`, `version_no`)
+    UNIQUE KEY `uk_semantic_draft_version` (`draft_id`, `version_no`),
+    UNIQUE KEY `uk_semantic_draft_version_request` (`draft_id`, `request_idempotency_key`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI语义建模草稿不可变版本快照表';
+
+-- Phase 4 persists Provider-call ownership before any external AI revision request is sent.
+CREATE TABLE IF NOT EXISTS `s2_semantic_modeling_revision_attempt` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'AI草稿修订尝试ID',
+    `draft_id` bigint NOT NULL COMMENT '所属隔离草稿ID',
+    `base_version_no` int NOT NULL COMMENT 'Provider调用绑定的草稿基线版本号',
+    `idempotency_key` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL
+        COMMENT '草稿内修订幂等键（大小写敏感）',
+    `request_fingerprint` varchar(128) NOT NULL COMMENT '规范化修订请求指纹',
+    `status` varchar(32) NOT NULL COMMENT 'RUNNING、SUCCEEDED、FAILED或SYSTEM_FAILED',
+    `active_marker` int DEFAULT NULL COMMENT 'RUNNING时为1，终态置NULL以释放草稿活动租约',
+    `lease_started_at` datetime NOT NULL COMMENT '修订租约开始时间',
+    `lease_expires_at` datetime NOT NULL COMMENT '修订租约过期时间',
+    `result_version_id` bigint DEFAULT NULL COMMENT 'SUCCEEDED时生成的不可变版本ID',
+    `result_version_no` int DEFAULT NULL COMMENT 'SUCCEEDED时生成的草稿版本号',
+    `llm_conversation_id` bigint DEFAULT NULL COMMENT 'Provider调用关联的阶段1本地会话ID',
+    `error_code` varchar(64) DEFAULT NULL COMMENT '稳定且脱敏的失败码',
+    `created_by` varchar(100) NOT NULL COMMENT '认领人',
+    `created_at` datetime NOT NULL COMMENT '创建时间',
+    `updated_by` varchar(100) NOT NULL COMMENT '最近更新人',
+    `updated_at` datetime NOT NULL COMMENT '最近更新时间',
+    `finished_at` datetime DEFAULT NULL COMMENT '成功、失败或过期结束时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_semantic_revision_attempt_request` (`draft_id`, `idempotency_key`),
+    UNIQUE KEY `uk_semantic_revision_attempt_active` (`draft_id`, `active_marker`),
+    KEY `idx_semantic_revision_attempt_draft` (`draft_id`, `id`),
+    KEY `idx_semantic_revision_attempt_lease` (`status`, `lease_expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='AI语义建模隔离草稿修订尝试与跨实例租约';
+
+-- AI semantic modeling phase 4: isolated validation reports only; never writes formal semantic assets.
+CREATE TABLE IF NOT EXISTS `s2_semantic_validation_report` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '草稿验证报告ID',
+    `draft_id` bigint NOT NULL COMMENT '所属隔离草稿ID',
+    `draft_version_id` bigint NOT NULL COMMENT '被验证的不可变草稿版本ID',
+    `draft_version_no` int NOT NULL COMMENT '被验证的草稿版本号',
+    `status` varchar(32) NOT NULL COMMENT 'RUNNING、PASSED、WARNING、FAILED或SYSTEM_FAILED',
+    `validation_options` mediumtext DEFAULT NULL COMMENT '规范化验证选项JSON',
+    `required_check_results` mediumtext DEFAULT NULL COMMENT '阶段4固定十项必需检查JSON',
+    `planned_objects` mediumtext DEFAULT NULL COMMENT '计划语义对象摘要JSON，不代表已发布',
+    `field_existence_result` mediumtext DEFAULT NULL COMMENT '字段存在性检查JSON',
+    `conflict_result` mediumtext DEFAULT NULL COMMENT '名称和术语冲突检查JSON',
+    `sensitive_field_result` mediumtext DEFAULT NULL COMMENT '敏感字段检查JSON',
+    `sample_question_results` mediumtext DEFAULT NULL COMMENT '样例问法验证结果JSON',
+    `sql_safety_result` mediumtext DEFAULT NULL COMMENT 'SQL只读安全检查JSON',
+    `performance_risk_result` mediumtext DEFAULT NULL COMMENT '性能风险检查JSON',
+    `uncertainty_result` mediumtext DEFAULT NULL COMMENT '不确定项检查JSON',
+    `blocking_items` mediumtext DEFAULT NULL COMMENT '阻塞提交待审批的问题JSON',
+    `warning_items` mediumtext DEFAULT NULL COMMENT '非阻塞警告JSON',
+    `blocking_count` int NOT NULL DEFAULT 0 COMMENT '阻塞项数量',
+    `warning_count` int NOT NULL DEFAULT 0 COMMENT '警告项数量',
+    `active_marker` int DEFAULT NULL COMMENT 'RUNNING时为1，终态置NULL以释放单草稿运行锁',
+    `system_error_code` varchar(64) DEFAULT NULL COMMENT '脱敏系统错误码',
+    `created_by` varchar(100) NOT NULL COMMENT '触发验证人',
+    `created_at` datetime NOT NULL COMMENT '验证报告创建时间',
+    `finished_at` datetime DEFAULT NULL COMMENT '验证完成或失败时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_semantic_validation_active` (`draft_id`, `active_marker`),
+    KEY `idx_semantic_validation_draft` (`draft_id`, `id`),
+    KEY `idx_semantic_validation_version_status` (`draft_version_id`, `status`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI语义建模隔离草稿验证报告，不写正式语义资产';
 
 CREATE TABLE IF NOT EXISTS `s2_database` (
                                              `id` bigint(20) NOT NULL AUTO_INCREMENT,

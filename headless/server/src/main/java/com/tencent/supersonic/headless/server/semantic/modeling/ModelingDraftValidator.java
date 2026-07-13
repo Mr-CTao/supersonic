@@ -105,7 +105,9 @@ public class ModelingDraftValidator {
         Map<String, String> objectTypes = new HashMap<>();
         Map<String, CrossTableObjectReference> crossTableObjects = new HashMap<>();
         Set<String> seenNames = normalizeNames(existingNames);
-        AtomicInteger uncertaintySequence = new AtomicInteger(payload.getUncertainties().size());
+        deduplicateUncertainties(payload);
+        AtomicInteger uncertaintySequence =
+                new AtomicInteger(maxUncertaintySequence(payload.getUncertainties()));
 
         for (int modelIndex = 0; modelIndex < payload.getModels().size(); modelIndex++) {
             ModelDraft model = payload.getModels().get(modelIndex);
@@ -147,6 +149,19 @@ public class ModelingDraftValidator {
         } catch (JsonProcessingException exception) {
             throw invalid(List.of(issue("$", "SERIALIZE_FAILED", "结构化草稿无法序列化")));
         }
+    }
+
+    /**
+     * 返回结构化草稿 JSON Schema 的请求级副本。
+     *
+     * <p>
+     * 阶段 4 AI 修订继续复用阶段 3 的同一输出契约，避免修订链路维护第二份 Schema。返回深拷贝是为了 防止调用方意外修改单例校验器持有的只读节点。
+     * </p>
+     *
+     * @return 可安全放入 LLM Gateway 请求的 JSON Schema 副本。
+     */
+    public JsonNode getJsonSchema() {
+        return schemaNode.deepCopy();
     }
 
     /**
@@ -642,12 +657,19 @@ public class ModelingDraftValidator {
                 "第一版仅支持单一 baseTable，该对象需要跨表建模，已从自动草稿中移除");
     }
 
-    /** 追加稳定 key 的不确定项。 */
+    /** 追加稳定 key 的不确定项；相同派生问题已存在时保持原 key，不在多轮校验中重复膨胀。 */
     private void addUncertainty(ModelingDraftPayload payload, AtomicInteger sequence,
             String modelKey, String objectKey, String field, String category, String severity,
             String reason) {
+        UncertaintyIdentity identity =
+                new UncertaintyIdentity(modelKey, objectKey, field, category, severity, reason);
+        boolean exists = payload.getUncertainties().stream().map(this::uncertaintyIdentity)
+                .anyMatch(identity::equals);
+        if (exists) {
+            return;
+        }
         UncertaintyDraft uncertainty = new UncertaintyDraft();
-        uncertainty.setKey("uncertainty_" + sequence.incrementAndGet());
+        uncertainty.setKey(nextUncertaintyKey(payload, sequence));
         uncertainty.setModelKey(modelKey);
         uncertainty.setObjectKey(objectKey);
         uncertainty.setField(field);
@@ -655,6 +677,50 @@ public class ModelingDraftValidator {
         uncertainty.setSeverity(severity);
         uncertainty.setReason(reason);
         payload.getUncertainties().add(uncertainty);
+    }
+
+    /** 对输入中已经重复的不确定项按稳定业务身份去重，并保留最先出现项及其审计 key。 */
+    private void deduplicateUncertainties(ModelingDraftPayload payload) {
+        Map<UncertaintyIdentity, UncertaintyDraft> unique = new LinkedHashMap<>();
+        for (UncertaintyDraft uncertainty : payload.getUncertainties()) {
+            unique.putIfAbsent(uncertaintyIdentity(uncertainty), uncertainty);
+        }
+        payload.setUncertainties(new ArrayList<>(unique.values()));
+    }
+
+    /** 读取既有 uncertainty_N key 的最大序号，避免稀疏历史 key 与新生成 key 冲突。 */
+    private int maxUncertaintySequence(List<UncertaintyDraft> uncertainties) {
+        int maximum = 0;
+        for (UncertaintyDraft uncertainty : uncertainties) {
+            String key = uncertainty.getKey();
+            if (StringUtils.startsWith(key, "uncertainty_")) {
+                try {
+                    maximum = Math.max(maximum,
+                            Integer.parseInt(key.substring("uncertainty_".length())));
+                } catch (NumberFormatException ignored) {
+                    // 自定义 key 仍由 Schema 和全局 key 校验处理，不参与自动序号分配。
+                }
+            }
+        }
+        return maximum;
+    }
+
+    /** 生成当前草稿内唯一的派生不确定项 key。 */
+    private String nextUncertaintyKey(ModelingDraftPayload payload, AtomicInteger sequence) {
+        Set<String> existingKeys = payload.getUncertainties().stream().map(UncertaintyDraft::getKey)
+                .collect(java.util.stream.Collectors.toSet());
+        String candidate;
+        do {
+            candidate = "uncertainty_" + sequence.incrementAndGet();
+        } while (existingKeys.contains(candidate));
+        return candidate;
+    }
+
+    /** 构造忽略审计 key 的不确定项业务身份。 */
+    private UncertaintyIdentity uncertaintyIdentity(UncertaintyDraft uncertainty) {
+        return new UncertaintyIdentity(uncertainty.getModelKey(), uncertainty.getObjectKey(),
+                uncertainty.getField(), uncertainty.getCategory(), uncertainty.getSeverity(),
+                uncertainty.getReason());
     }
 
     /** 解析本地、跨表或未知字段。 */
@@ -745,6 +811,10 @@ public class ModelingDraftValidator {
 
     /** 被单表约束移除的对象最小上下文，不保存对象正文或任何样例值。 */
     private record CrossTableObjectReference(String modelKey, String field) {}
+
+    /** 不确定项的稳定业务身份；审计 key 不参与比较，避免同一派生问题在多轮中重复。 */
+    private record UncertaintyIdentity(String modelKey, String objectKey, String field,
+            String category, String severity, String reason) {}
 
     /** 字段解析结果。 */
     private record FieldResolution(FieldResolutionType type, String field) {

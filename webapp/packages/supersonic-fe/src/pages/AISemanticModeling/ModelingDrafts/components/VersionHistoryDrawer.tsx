@@ -25,7 +25,7 @@ import {
   Typography,
 } from 'antd';
 import dayjs from 'dayjs';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   getModelingDraftVersion,
   getModelingDraftVersions,
@@ -40,6 +40,7 @@ import {
 import styles from '../style.less';
 
 const { Text, Title } = Typography;
+const VERSION_PAGE_SIZE = 50;
 
 type Props = {
   draftId?: number;
@@ -71,19 +72,27 @@ function formatDateTime(value?: string): string {
  */
 const VersionHistoryDrawer: React.FC<Props> = ({ draftId, open, onClose }) => {
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [versions, setVersions] = useState<ModelingDraftVersion[]>([]);
+  const [versionPage, setVersionPage] = useState(0);
+  const [versionTotal, setVersionTotal] = useState(0);
   const [snapshotLoadingVersion, setSnapshotLoadingVersion] = useState<number>();
   const [snapshot, setSnapshot] = useState<ModelingDraftVersion>();
   const [snapshotJson, setSnapshotJson] = useState('');
   const [snapshotError, setSnapshotError] = useState('');
+  const versionRequestRef = useRef(0);
 
   useEffect(() => {
     if (!open || !draftId) {
       return undefined;
     }
     let active = true;
+    const requestId = ++versionRequestRef.current;
     setLoading(true);
+    setLoadingMore(false);
     setVersions([]);
+    setVersionPage(0);
+    setVersionTotal(0);
     setSnapshot(undefined);
     setSnapshotJson('');
     setSnapshotError('');
@@ -91,16 +100,22 @@ const VersionHistoryDrawer: React.FC<Props> = ({ draftId, open, onClose }) => {
     /** 加载版本摘要列表，关闭抽屉后忽略迟到响应。 */
     const loadVersions = async () => {
       try {
-        const data = unwrapResponseData<any>(await getModelingDraftVersions(draftId)) || {};
-        if (active) {
-          setVersions(Array.isArray(data) ? data : data.list || []);
+        const data =
+          unwrapResponseData<any>(
+            await getModelingDraftVersions(draftId, { page: 1, pageSize: VERSION_PAGE_SIZE }),
+          ) || {};
+        const list = (Array.isArray(data) ? data : data.list || []) as ModelingDraftVersion[];
+        if (active && requestId === versionRequestRef.current) {
+          setVersions(list);
+          setVersionPage(1);
+          setVersionTotal(Number(Array.isArray(data) ? list.length : data.total ?? list.length));
         }
       } catch (error) {
-        if (active) {
+        if (active && requestId === versionRequestRef.current) {
           message.error(getRequestErrorText(error));
         }
       } finally {
-        if (active) {
+        if (active && requestId === versionRequestRef.current) {
           setLoading(false);
         }
       }
@@ -109,8 +124,47 @@ const VersionHistoryDrawer: React.FC<Props> = ({ draftId, open, onClose }) => {
     void loadVersions();
     return () => {
       active = false;
+      versionRequestRef.current += 1;
     };
   }, [draftId, open]);
+
+  /** 按页追加更早的版本摘要，避免版本较多时一次性加载全部记录。 */
+  const loadMoreVersions = async () => {
+    if (!open || !draftId || loading || loadingMore || versions.length >= versionTotal) {
+      return;
+    }
+    const nextPage = versionPage + 1;
+    const requestId = ++versionRequestRef.current;
+    setLoadingMore(true);
+    try {
+      const data =
+        unwrapResponseData<any>(
+          await getModelingDraftVersions(draftId, {
+            page: nextPage,
+            pageSize: VERSION_PAGE_SIZE,
+          }),
+        ) || {};
+      const list = (Array.isArray(data) ? data : data.list || []) as ModelingDraftVersion[];
+      if (requestId !== versionRequestRef.current) return;
+      setVersions((previous) => {
+        const merged = new Map(previous.map((item) => [item.versionNo, item]));
+        list.forEach((item) => merged.set(item.versionNo, item));
+        return [...merged.values()].sort((left, right) => right.versionNo - left.versionNo);
+      });
+      setVersionPage(nextPage);
+      setVersionTotal(
+        Number(
+          Array.isArray(data)
+            ? Math.max(versionTotal, versions.length + list.length)
+            : data.total ?? versionTotal,
+        ),
+      );
+    } catch (error) {
+      if (requestId === versionRequestRef.current) message.error(getRequestErrorText(error));
+    } finally {
+      if (requestId === versionRequestRef.current) setLoadingMore(false);
+    }
+  };
 
   /**
    * 按需读取指定版本结构化快照。
@@ -157,6 +211,15 @@ const VersionHistoryDrawer: React.FC<Props> = ({ draftId, open, onClose }) => {
           <List<ModelingDraftVersion>
             bordered
             dataSource={versions}
+            footer={
+              versions.length < versionTotal ? (
+                <Button block loading={loadingMore} onClick={() => void loadMoreVersions()}>
+                  加载更早版本（已加载 {versions.length}/{versionTotal}）
+                </Button>
+              ) : (
+                <Text type="secondary">已加载全部 {versionTotal} 个版本</Text>
+              )
+            }
             renderItem={(item) => (
               <List.Item
                 actions={[
@@ -173,7 +236,7 @@ const VersionHistoryDrawer: React.FC<Props> = ({ draftId, open, onClose }) => {
               >
                 <List.Item.Meta
                   title={
-                    <Space>
+                    <Space wrap>
                       <Tag color="blue">版本 {item.versionNo}</Tag>
                       <Text>{item.changeSummary || '未填写变更摘要'}</Text>
                     </Space>

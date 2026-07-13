@@ -49,16 +49,16 @@ import java.util.stream.Collectors;
 /**
  * 标签元数据服务实现。
  *
- * <p>职责：
+ * <p>
+ * 职责：
  * <ul>
- *   <li>维护 `s2_tag` 中标签到维度、指标等语义元素的映射；</li>
- *   <li>补全标签市场展示所需的模型、主题域、标签对象、收藏和管理权限信息；</li>
- *   <li>在标签功能通过前端开关启用后，保障新建库可以完成标签创建、编辑和查询闭环。</li>
+ * <li>维护 `s2_tag` 中标签到维度、指标等语义元素的映射；</li>
+ * <li>补全标签市场展示所需的模型、主题域、标签对象、收藏和管理权限信息；</li>
+ * <li>在标签功能通过前端开关启用后，保障新建库可以完成标签创建、编辑和查询闭环。</li>
  * </ul>
  *
- * <p>并发说明：本类不持有可变共享集合或缓存，单例服务自身是无状态的。
- * 标签写入依赖数据库主键和更新语句保障原子性；当前表没有 RowVersion，
- * 因此同一标签的并发编辑采用后写覆盖先写的策略。
+ * <p>
+ * 并发说明：本类不持有可变共享集合或缓存，单例服务自身是无状态的。 标签写入依赖数据库主键和更新语句保障原子性；当前表没有 RowVersion， 因此同一标签的并发编辑采用后写覆盖先写的策略。
  */
 @Service
 @Slf4j
@@ -103,14 +103,19 @@ public class TagMetaServiceImpl implements TagMetaService {
     /**
      * 更新标签映射。
      *
-     * <p>调用示例：
-     * <pre>{@code
-     * TagReq req = new TagReq();
-     * req.setId(10L);
-     * req.setTagDefineType(TagDefineType.DIMENSION);
-     * req.setItemId(1001L);
-     * tagMetaService.update(req, user);
-     * }</pre>
+     * <p>
+     * 调用示例：
+     *
+     * <pre>
+     * {
+     *     &#64;code
+     *     TagReq req = new TagReq();
+     *     req.setId(10L);
+     *     req.setTagDefineType(TagDefineType.DIMENSION);
+     *     req.setItemId(1001L);
+     *     tagMetaService.update(req, user);
+     * }
+     * </pre>
      *
      * @param tagReq 标签更新请求，必须包含已有标签 ID。
      * @param user 当前操作用户。
@@ -125,7 +130,8 @@ public class TagMetaServiceImpl implements TagMetaService {
         }
         TagDO existTag = tagRepository.getTagById(tagReq.getId());
         if (Objects.isNull(existTag)) {
-            throw new RuntimeException(String.format("the tag is not exist, id:%s", tagReq.getId()));
+            throw new RuntimeException(
+                    String.format("the tag is not exist, id:%s", tagReq.getId()));
         }
 
         checkExist(tagReq, tagReq.getId());
@@ -433,8 +439,8 @@ public class TagMetaServiceImpl implements TagMetaService {
         }
 
         List<TagDO> tagRespList = tagRepository.getTagDOList(tagFilter);
-        boolean hasDuplicate = !CollectionUtils.isEmpty(tagRespList) && tagRespList.stream()
-                .anyMatch(tagDO -> Objects.isNull(excludeTagId)
+        boolean hasDuplicate = !CollectionUtils.isEmpty(tagRespList)
+                && tagRespList.stream().anyMatch(tagDO -> Objects.isNull(excludeTagId)
                         || !excludeTagId.equals(tagDO.getId()));
         if (hasDuplicate) {
             throw new RuntimeException(

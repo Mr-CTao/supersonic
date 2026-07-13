@@ -1,7 +1,8 @@
 /**
  * 建模草稿详情工作台内容组件。
  *
- * 职责：展示状态、来源、重试次数与失败操作，并组织结构树、对象表单、分类预览和 JSON 高级编辑；不负责请求、轮询或保存。
+ * 职责：展示状态、来源、重试次数与失败操作，并组织阶段 3 语义结构以及阶段 4 AI 修订、
+ * 验证报告、版本差异/历史高阶 Tab；不负责请求、轮询或保存。
  *
  * 并发说明：组件完全受控，所有编辑立即回传父级工作台，不维护异步状态或定时器。
  */
@@ -22,7 +23,7 @@ import {
   Typography,
 } from 'antd';
 import dayjs from 'dayjs';
-import React, { useMemo } from 'react';
+import React, { type ReactNode, useMemo } from 'react';
 import type {
   ModelingDraftItem,
   ModelingDraftStatus,
@@ -39,24 +40,32 @@ const STATUS_TEXT: Record<ModelingDraftStatus, string> = {
   GENERATING: '生成中',
   DRAFT: '草稿',
   GENERATION_FAILED: '生成失败',
+  PENDING_APPROVAL: '待审批',
 };
 
 const STATUS_COLOR: Record<ModelingDraftStatus, string> = {
   GENERATING: 'processing',
   DRAFT: 'blue',
   GENERATION_FAILED: 'error',
+  PENDING_APPROVAL: 'success',
 };
 
 type Props = {
+  activeTab: string;
+  aiRevisionContent: ReactNode;
   detail: ModelingDraftItem;
   draft?: SemanticModelingDraftJson;
   jsonText: string;
   jsonError?: string;
   loadParseError?: string;
+  writeBlockedReason?: string;
   dirty: boolean;
   regenerationAllowed: boolean;
   regenerationReason: string;
   regenerating: boolean;
+  validationContent: ReactNode;
+  versionDiffContent: ReactNode;
+  onActiveTabChange: (key: string) => void;
   onDraftChange: (value: SemanticModelingDraftJson) => void;
   onJsonTextChange: (value: string) => void;
   onRegenerate: () => void;
@@ -82,21 +91,28 @@ function renderStatus(status: ModelingDraftStatus) {
  * @throws 不抛出异常。
  */
 const DraftWorkbenchContent: React.FC<Props> = ({
+  activeTab,
+  aiRevisionContent,
   detail,
   draft,
   jsonText,
   jsonError,
   loadParseError,
+  writeBlockedReason,
   dirty,
   regenerationAllowed,
   regenerationReason,
   regenerating,
+  validationContent,
+  versionDiffContent,
+  onActiveTabChange,
   onDraftChange,
   onJsonTextChange,
   onRegenerate,
 }) => {
   const treeData = useMemo(() => buildDraftTreeData(draft), [draft]);
   const businessGoal = draft?.businessGoal || detail.businessGoal || '-';
+  const editable = detail.status === 'DRAFT' && !writeBlockedReason;
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
@@ -143,8 +159,11 @@ const DraftWorkbenchContent: React.FC<Props> = ({
           }
         />
       ) : null}
-      {loadParseError && detail.status === 'DRAFT' ? (
+      {loadParseError && (detail.status === 'DRAFT' || detail.status === 'PENDING_APPROVAL') ? (
         <Alert showIcon type="error" title="结构化草稿无法解析" description={loadParseError} />
+      ) : null}
+      {writeBlockedReason ? (
+        <Alert showIcon type="warning" title="草稿暂时只读" description={writeBlockedReason} />
       ) : null}
 
       <Descriptions bordered column={3} size="small">
@@ -182,68 +201,107 @@ const DraftWorkbenchContent: React.FC<Props> = ({
         <Descriptions.Item label="更新时间">{formatDateTime(detail.updatedAt)}</Descriptions.Item>
       </Descriptions>
 
-      {detail.status === 'DRAFT' ? (
-        <Row gutter={16} wrap={false}>
-          <Col flex="280px">
-            <Card className={styles.structureTreeCard} size="small" title="语义资产结构树">
-              {treeData.length ? (
-                <Tree defaultExpandAll showLine treeData={treeData} />
-              ) : (
-                <Empty description="暂无结构" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              )}
-            </Card>
-          </Col>
-          <Col className={styles.workbenchContent} flex="auto">
-            <Tabs
-              items={[
-                {
-                  key: 'object-editor',
-                  label: dirty ? '对象编辑 *' : '对象编辑',
-                  children: draft ? (
-                    <DraftObjectEditor value={draft} onChange={onDraftChange} />
-                  ) : (
-                    <Alert
-                      showIcon
-                      type="error"
-                      title="对象表单暂不可用"
-                      description="请先在 JSON 高级编辑中修复格式错误。"
+      {detail.status === 'DRAFT' || detail.status === 'PENDING_APPROVAL' ? (
+        <Tabs
+          activeKey={activeTab}
+          destroyOnHidden={false}
+          items={[
+            {
+              key: 'semantic-structure',
+              label: dirty ? '语义结构 *' : '语义结构',
+              children: editable ? (
+                <Row gutter={16} wrap={false}>
+                  <Col flex="280px">
+                    <Card className={styles.structureTreeCard} size="small" title="语义资产结构树">
+                      {treeData.length ? (
+                        <Tree defaultExpandAll showLine treeData={treeData} />
+                      ) : (
+                        <Empty description="暂无结构" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      )}
+                    </Card>
+                  </Col>
+                  <Col className={styles.workbenchContent} flex="auto">
+                    <Tabs
+                      items={[
+                        {
+                          key: 'object-editor',
+                          label: dirty ? '对象编辑 *' : '对象编辑',
+                          children: draft ? (
+                            <DraftObjectEditor value={draft} onChange={onDraftChange} />
+                          ) : (
+                            <Alert
+                              showIcon
+                              type="error"
+                              title="对象表单暂不可用"
+                              description="请先在 JSON 高级编辑中修复格式错误。"
+                            />
+                          ),
+                        },
+                        {
+                          key: 'preview',
+                          label: '分类预览',
+                          children: <DraftStructurePreview draft={draft} />,
+                        },
+                        {
+                          key: 'json',
+                          label: dirty ? 'JSON 高级编辑 *' : 'JSON 高级编辑',
+                          children: (
+                            <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+                              <Alert
+                                showIcon
+                                type="info"
+                                title="结构化 JSON 高级编辑"
+                                description="保存前后端会重新校验表、字段、指标表达式和术语引用；这里不会接受任意 SQL。"
+                              />
+                              {jsonError ? <Alert showIcon type="error" title={jsonError} /> : null}
+                              <Input.TextArea
+                                aria-label="结构化草稿 JSON"
+                                className={styles.jsonEditor}
+                                spellCheck={false}
+                                value={jsonText}
+                                onChange={(event) => onJsonTextChange(event.target.value)}
+                              />
+                              <Text type="secondary">
+                                页面不展示 LLM 原始输出，也不展示进入模型上下文的脱敏样例行。
+                              </Text>
+                            </Space>
+                          ),
+                        },
+                      ]}
                     />
-                  ),
-                },
-                {
-                  key: 'preview',
-                  label: '分类预览',
-                  children: <DraftStructurePreview draft={draft} />,
-                },
-                {
-                  key: 'json',
-                  label: dirty ? 'JSON 高级编辑 *' : 'JSON 高级编辑',
-                  children: (
-                    <Space orientation="vertical" size={8} style={{ width: '100%' }}>
-                      <Alert
-                        showIcon
-                        type="info"
-                        title="结构化 JSON 高级编辑"
-                        description="保存前后端会重新校验表、字段、指标表达式和术语引用；这里不会接受任意 SQL。"
-                      />
-                      {jsonError ? <Alert showIcon type="error" title={jsonError} /> : null}
-                      <Input.TextArea
-                        aria-label="结构化草稿 JSON"
-                        className={styles.jsonEditor}
-                        spellCheck={false}
-                        value={jsonText}
-                        onChange={(event) => onJsonTextChange(event.target.value)}
-                      />
-                      <Text type="secondary">
-                        页面不展示 LLM 原始输出，也不展示进入模型上下文的脱敏样例行。
-                      </Text>
-                    </Space>
-                  ),
-                },
-              ]}
-            />
-          </Col>
-        </Row>
+                  </Col>
+                </Row>
+              ) : (
+                <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+                  <Alert
+                    showIcon
+                    type="success"
+                    title="草稿已提交审批，语义结构已切换为只读"
+                    description="本阶段不会在待审批状态继续修改、发布或回滚正式语义对象。"
+                  />
+                  <DraftStructurePreview draft={draft} />
+                  {jsonText ? <pre className={styles.readonlyJson}>{jsonText}</pre> : null}
+                </Space>
+              ),
+            },
+            {
+              key: 'ai-revision',
+              label: 'AI 修订',
+              children: aiRevisionContent,
+            },
+            {
+              key: 'validation',
+              label: '验证报告',
+              children: validationContent,
+            },
+            {
+              key: 'version-diff',
+              label: '版本差异 / 历史',
+              children: versionDiffContent,
+            },
+          ]}
+          onChange={onActiveTabChange}
+        />
       ) : null}
     </Space>
   );

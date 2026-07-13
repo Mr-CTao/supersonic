@@ -3,8 +3,10 @@ package com.tencent.supersonic.headless.server.semantic.gap;
 /**
  * 语义缺口失败类型枚举。
  *
- * <p>职责说明：统一描述 Chat BI 问答链路中可沉淀为语义治理待办的失败或负反馈信号，避免 Controller、Service 和前端使用散落的魔法字符串。
- * 并发说明：枚举本身不可变且无共享可写状态，不需要额外并发保护。</p>
+ * <p>
+ * 职责说明：统一描述 Chat BI 问答链路中可沉淀为语义治理待办的失败或负反馈信号，避免 Controller、Service 和前端使用散落的魔法字符串。
+ * 并发说明：枚举本身不可变且无共享可写状态，不需要额外并发保护。
+ * </p>
  */
 public enum SemanticGapFailureType {
 

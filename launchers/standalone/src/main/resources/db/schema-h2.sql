@@ -259,6 +259,10 @@ CREATE TABLE IF NOT EXISTS `s2_semantic_modeling_draft`
     `repaired_output`        CLOB DEFAULT NULL,
     `error_code`             VARCHAR(64) DEFAULT NULL,
     `error_message`          VARCHAR(1500) DEFAULT NULL,
+    `submitted_validation_report_id` BIGINT DEFAULT NULL,
+    `submission_idempotency_key` VARCHAR(128) DEFAULT NULL,
+    `submitted_by`           VARCHAR(100) DEFAULT NULL,
+    `submitted_at`           TIMESTAMP DEFAULT NULL,
     `created_by`             VARCHAR(100) NOT NULL,
     `created_at`             TIMESTAMP NOT NULL,
     `updated_by`             VARCHAR(100) NOT NULL,
@@ -266,7 +270,7 @@ CREATE TABLE IF NOT EXISTS `s2_semantic_modeling_draft`
 );
 
 COMMENT ON TABLE `s2_semantic_modeling_draft` IS
-    'AI semantic modeling structured draft; statuses are GENERATING, DRAFT and GENERATION_FAILED';
+    'Isolated AI semantic modeling draft; phase 4 may mark PENDING_APPROVAL but never writes formal semantic assets';
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_semantic_draft_idempotency`
     ON `s2_semantic_modeling_draft` (`created_by`, `idempotency_key`);
 CREATE INDEX IF NOT EXISTS `idx_semantic_draft_source`
@@ -324,14 +328,91 @@ CREATE TABLE IF NOT EXISTS `s2_semantic_modeling_draft_version`
     `change_source`       VARCHAR(32) NOT NULL,
     `change_summary`      VARCHAR(1000) DEFAULT NULL,
     `llm_conversation_id` BIGINT DEFAULT NULL,
+    `request_idempotency_key` VARCHAR(128) DEFAULT NULL,
+    `request_fingerprint` VARCHAR(128) DEFAULT NULL,
+    `result_lock_version` INT DEFAULT NULL,
     `created_by`          VARCHAR(100) NOT NULL,
     `created_at`          TIMESTAMP NOT NULL
 );
 
 COMMENT ON TABLE `s2_semantic_modeling_draft_version` IS
-    'Immutable AI semantic modeling draft snapshots; change source is AI_GENERATED or MANUAL_SAVE';
+    'Immutable isolated draft snapshots; change source is AI_GENERATED, MANUAL_SAVE or AI_REVISED';
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_semantic_draft_version`
     ON `s2_semantic_modeling_draft_version` (`draft_id`, `version_no`);
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_semantic_draft_version_request`
+    ON `s2_semantic_modeling_draft_version` (`draft_id`, `request_idempotency_key`);
+
+-- Phase 4 persists Provider-call ownership before any external AI revision request is sent.
+CREATE TABLE IF NOT EXISTS `s2_semantic_modeling_revision_attempt`
+(
+    `id`                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `draft_id`              BIGINT NOT NULL,
+    `base_version_no`       INT NOT NULL,
+    `idempotency_key`       VARCHAR(128) NOT NULL,
+    `request_fingerprint`   VARCHAR(128) NOT NULL,
+    `status`                VARCHAR(32) NOT NULL,
+    `active_marker`         INT DEFAULT NULL,
+    `lease_started_at`      TIMESTAMP NOT NULL,
+    `lease_expires_at`      TIMESTAMP NOT NULL,
+    `result_version_id`     BIGINT DEFAULT NULL,
+    `result_version_no`     INT DEFAULT NULL,
+    `llm_conversation_id`   BIGINT DEFAULT NULL,
+    `error_code`            VARCHAR(64) DEFAULT NULL,
+    `created_by`            VARCHAR(100) NOT NULL,
+    `created_at`            TIMESTAMP NOT NULL,
+    `updated_by`            VARCHAR(100) NOT NULL,
+    `updated_at`            TIMESTAMP NOT NULL,
+    `finished_at`           TIMESTAMP DEFAULT NULL
+);
+
+COMMENT ON TABLE `s2_semantic_modeling_revision_attempt` IS
+    'Persistent cross-instance leases for isolated AI draft revision; no formal semantic asset writes';
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_semantic_revision_attempt_request`
+    ON `s2_semantic_modeling_revision_attempt` (`draft_id`, `idempotency_key`);
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_semantic_revision_attempt_active`
+    ON `s2_semantic_modeling_revision_attempt` (`draft_id`, `active_marker`);
+CREATE INDEX IF NOT EXISTS `idx_semantic_revision_attempt_draft`
+    ON `s2_semantic_modeling_revision_attempt` (`draft_id`, `id`);
+CREATE INDEX IF NOT EXISTS `idx_semantic_revision_attempt_lease`
+    ON `s2_semantic_modeling_revision_attempt` (`status`, `lease_expires_at`);
+
+-- Phase 4 stores validation evidence for isolated draft versions only. It never writes formal semantic assets.
+CREATE TABLE IF NOT EXISTS `s2_semantic_validation_report`
+(
+    `id`                       BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `draft_id`                 BIGINT NOT NULL,
+    `draft_version_id`         BIGINT NOT NULL,
+    `draft_version_no`         INT NOT NULL,
+    `status`                   VARCHAR(32) NOT NULL,
+    `validation_options`       CLOB DEFAULT NULL,
+    `required_check_results`   CLOB DEFAULT NULL,
+    `planned_objects`          CLOB DEFAULT NULL,
+    `field_existence_result`   CLOB DEFAULT NULL,
+    `conflict_result`          CLOB DEFAULT NULL,
+    `sensitive_field_result`   CLOB DEFAULT NULL,
+    `sample_question_results`  CLOB DEFAULT NULL,
+    `sql_safety_result`        CLOB DEFAULT NULL,
+    `performance_risk_result`  CLOB DEFAULT NULL,
+    `uncertainty_result`       CLOB DEFAULT NULL,
+    `blocking_items`           CLOB DEFAULT NULL,
+    `warning_items`            CLOB DEFAULT NULL,
+    `blocking_count`           INT NOT NULL DEFAULT 0,
+    `warning_count`            INT NOT NULL DEFAULT 0,
+    `active_marker`            INT DEFAULT NULL,
+    `system_error_code`        VARCHAR(64) DEFAULT NULL,
+    `created_by`               VARCHAR(100) NOT NULL,
+    `created_at`               TIMESTAMP NOT NULL,
+    `finished_at`              TIMESTAMP DEFAULT NULL
+);
+
+COMMENT ON TABLE `s2_semantic_validation_report` IS
+    'Phase 4 validation reports for isolated drafts; no approval, publication or formal semantic asset writes';
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_semantic_validation_active`
+    ON `s2_semantic_validation_report` (`draft_id`, `active_marker`);
+CREATE INDEX IF NOT EXISTS `idx_semantic_validation_draft`
+    ON `s2_semantic_validation_report` (`draft_id`, `id`);
+CREATE INDEX IF NOT EXISTS `idx_semantic_validation_version_status`
+    ON `s2_semantic_validation_report` (`draft_version_id`, `status`);
 
 create table IF NOT EXISTS s2_user
 (

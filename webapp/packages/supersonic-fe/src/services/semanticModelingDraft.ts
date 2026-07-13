@@ -3,6 +3,7 @@
  *
  * 职责：
  * - 统一封装阶段 3 草稿创建、重新生成、生成尝试、分页查询、详情保存和版本快照接口；
+ * - 封装阶段 4 AI 多轮修订、版本差异、验证报告和提交审批门禁接口；
  * - 描述草稿 JSON 1.0 的前端数据结构，供列表、创建表单和详情工作台复用；
  * - 仅操作独立草稿接口，不调用正式模型、维度、指标、术语或发布接口。
  *
@@ -14,10 +15,14 @@
 import request from 'umi-request';
 
 const MODELING_DRAFT_BASE_URL = '/api/semantic/modeling/drafts';
+const MODELING_VALIDATION_REPORT_BASE_URL = '/api/semantic/modeling/validation-reports';
 const SEMANTIC_GAP_BASE_URL = '/api/semantic/gaps';
 
+/** 与后端 ModelingDraftAiReviseReq 的 @Size(max = 2000) 保持一致。 */
+export const MODELING_DRAFT_REVISION_INSTRUCTION_MAX_LENGTH = 2000;
+
 export type ModelingDraftSourceType = 'SEMANTIC_GAP' | 'DATA_SOURCE';
-export type ModelingDraftStatus = 'GENERATING' | 'DRAFT' | 'GENERATION_FAILED';
+export type ModelingDraftStatus = 'GENERATING' | 'DRAFT' | 'GENERATION_FAILED' | 'PENDING_APPROVAL';
 export type ModelingDraftAttemptStatus =
   | 'QUEUED'
   | 'GENERATING'
@@ -163,6 +168,8 @@ export type ModelingDraftItem = {
   canRegenerate?: boolean;
   /** 无法重新生成时可安全展示的阻断原因。 */
   regenerationBlockReason?: string;
+  /** 详情接口返回的服务端写权限；false 时页面必须保持只读。 */
+  canManage?: boolean;
 };
 
 export type ModelingValidationIssue = {
@@ -220,6 +227,155 @@ export type ModelingDraftVersion = {
   draftJson?: string;
   createdBy?: string;
   createdAt?: string;
+};
+
+/** 草稿版本摘要分页参数；版本历史必须显式分页，避免只展示服务端默认前 20 条。 */
+export type ModelingDraftVersionQueryParams = {
+  page?: number;
+  pageSize?: number;
+};
+
+/** 阶段 4 AI 修订或版本比较返回的单个结构化差异。 */
+export type ModelingDraftChangeItem = {
+  path: string;
+  changeType: 'ADDED' | 'REMOVED' | 'CHANGED' | 'MODIFIED' | string;
+  beforeValue?: unknown;
+  afterValue?: unknown;
+};
+
+/** AI 多轮修订请求；baseVersionNo 用于拒绝覆盖已变化的草稿。 */
+export type AiReviseModelingDraftReq = {
+  instruction: string;
+  baseVersionNo: number;
+};
+
+/** AI 多轮修订结果；完整详情仍应通过详情接口重新读取。 */
+export type AiReviseModelingDraftResp = {
+  draftId: number;
+  baseVersionNo: number;
+  newVersionNo: number;
+  lockVersion: number;
+  draftJson: SemanticModelingDraftJson | string;
+  changeSummary?: string;
+  changes?: ModelingDraftChangeItem[];
+  uncertaintyItems?: DraftUncertainty[];
+  idempotentReplay?: boolean;
+};
+
+/** 两个不可变草稿版本之间的结构化差异。 */
+export type ModelingDraftVersionDiff = {
+  draftId: number;
+  fromVersionNo: number;
+  toVersionNo: number;
+  summary?: string;
+  items?: ModelingDraftChangeItem[];
+  truncated?: boolean;
+};
+
+/** 追加式恢复请求；两个基线字段共同防止覆盖并发写入。 */
+export type RestoreModelingDraftVersionReq = {
+  currentVersionNo: number;
+  lockVersion: number;
+};
+
+/** 恢复只创建新草稿版本，不修改历史快照或正式语义对象。 */
+export type RestoreModelingDraftVersionResp = {
+  draftId: number;
+  targetVersionNo: number;
+  baseVersionNo: number;
+  newVersionNo: number;
+  lockVersion: number;
+  currentDraft: SemanticModelingDraftJson;
+  idempotentReplay?: boolean;
+};
+
+export type ModelingValidationStatus =
+  | 'PASSED'
+  | 'WARNING'
+  | 'FAILED'
+  | 'NOT_RUN'
+  | 'RUNNING'
+  | 'SYSTEM_FAILED';
+
+/** 验证报告中的安全展示问题；服务端应先完成敏感内容脱敏。 */
+export type ModelingValidationItem = {
+  path?: string;
+  code?: string;
+  category?: string;
+  message?: string;
+  detail?: string;
+  severity?: string;
+  modelKey?: string;
+  objectType?: string;
+  objectKey?: string;
+  blocking?: boolean;
+};
+
+/** 验证报告的分类结果保留扩展字段，以兼容不同隔离校验器的结构化明细。 */
+export type ModelingValidationCheckResult = {
+  category?: string;
+  status?: ModelingValidationStatus | string;
+  passed?: boolean;
+  summary?: string;
+  message?: string;
+  items?: unknown[];
+  issues?: unknown[];
+  [key: string]: unknown;
+};
+
+/** 与草稿不可变版本绑定的阶段 4 验证报告。 */
+export type ModelingValidationReport = {
+  id: number;
+  draftId: number;
+  draftVersionId?: number;
+  draftVersionNo: number;
+  status: ModelingValidationStatus;
+  plannedObjects?: unknown;
+  requiredCheckResults?: ModelingValidationCheckResult[];
+  sampleQuestionResults?: unknown;
+  sqlSafetyResult?: ModelingValidationCheckResult | unknown;
+  sensitiveFieldResult?: ModelingValidationCheckResult | unknown;
+  conflictResult?: ModelingValidationCheckResult | unknown;
+  fieldExistenceResult?: ModelingValidationCheckResult | unknown;
+  uncertaintyResult?: ModelingValidationCheckResult | unknown;
+  performanceRiskResult?: ModelingValidationCheckResult | unknown;
+  blockingItems?: ModelingValidationItem[] | string[] | string;
+  warningItems?: ModelingValidationItem[] | string[] | string;
+  blockingCount?: number;
+  warningCount?: number;
+  canSubmit?: boolean;
+  submissionBlockReason?: string;
+  createdBy?: string;
+  createdAt?: string;
+  finishedAt?: string;
+};
+
+export type ValidateModelingDraftReq = {
+  versionNo: number;
+  validationOptions?: {
+    sqlPreviewLimit?: number;
+  };
+};
+
+export type ModelingValidationReportQueryParams = {
+  page?: number;
+  pageSize?: number;
+};
+
+export type SubmitModelingDraftReq = {
+  versionNo: number;
+  validationReportId: number;
+};
+
+/** 提交审批只改变草稿治理状态，不代表正式语义资产已经发布。 */
+export type SubmitModelingDraftResp = {
+  draftId: number;
+  versionNo: number;
+  validationReportId: number;
+  status: 'PENDING_APPROVAL';
+  submittedBy?: string;
+  submittedAt?: string;
+  idempotentReplay?: boolean;
 };
 
 export type ModelingDraftQueryParams = {
@@ -394,12 +550,17 @@ export function getModelingDraftAttempts(
  * 查询草稿的版本摘要列表。
  *
  * @param id 草稿 ID。
+ * @param params 可选页码与页大小；阶段 4 页面应显式分页，避免只读取默认前 20 条。
  * @returns 后端统一响应，data 为版本分页对象。
  * @throws 草稿不存在、越权或网络失败时抛出异常。
  */
-export function getModelingDraftVersions(id: number): Promise<any> {
+export function getModelingDraftVersions(
+  id: number,
+  params?: ModelingDraftVersionQueryParams,
+): Promise<any> {
   return request(`${MODELING_DRAFT_BASE_URL}/${id}/versions`, {
     method: 'GET',
+    ...(params ? { params } : {}),
   });
 }
 
@@ -414,5 +575,142 @@ export function getModelingDraftVersions(id: number): Promise<any> {
 export function getModelingDraftVersion(id: number, versionNo: number): Promise<any> {
   return request(`${MODELING_DRAFT_BASE_URL}/${id}/versions/${versionNo}`, {
     method: 'GET',
+  });
+}
+
+/**
+ * 把历史快照追加为新的当前草稿版本。
+ *
+ * @param id 草稿 ID。
+ * @param versionNo 目标历史版本号。
+ * @param data 客户端确认的当前版本和锁版本。
+ * @param idempotencyKey 当前恢复动作重试期间稳定复用的幂等键。
+ * @returns 新版本、锁版本和恢复后的完整草稿。
+ * @throws viewer/public 无权限、状态只读、活动写操作或基线过期时抛出异常。
+ */
+export function restoreModelingDraftVersion(
+  id: number,
+  versionNo: number,
+  data: RestoreModelingDraftVersionReq,
+  idempotencyKey: string,
+): Promise<any> {
+  return request(`${MODELING_DRAFT_BASE_URL}/${id}/versions/${versionNo}/restore`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+    },
+    data,
+  });
+}
+
+/**
+ * 基于指定草稿版本执行一次 AI 对话修订。
+ *
+ * @param id 草稿 ID。
+ * @param data 管理员自然语言指令和基线版本号。
+ * @param idempotencyKey 当前指令重试期间稳定复用的幂等键。
+ * @returns 修订后的新版本、结构化差异和不确定项。
+ * @throws 基线版本过期时返回 409；权限、模型或结构校验失败时也会抛出异常。
+ */
+export function aiReviseModelingDraft(
+  id: number,
+  data: AiReviseModelingDraftReq,
+  idempotencyKey: string,
+): Promise<any> {
+  return request(`${MODELING_DRAFT_BASE_URL}/${id}/ai-revise`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+    },
+    data,
+  });
+}
+
+/**
+ * 查询两个不可变草稿版本之间的结构化差异。
+ *
+ * @param id 草稿 ID。
+ * @param fromVersionNo 起始版本号。
+ * @param toVersionNo 目标版本号。
+ * @returns 差异摘要、明细和是否截断标记。
+ * @throws 版本不存在、越权或网络失败时抛出异常。
+ */
+export function getModelingDraftVersionDiff(
+  id: number,
+  fromVersionNo: number,
+  toVersionNo: number,
+): Promise<any> {
+  return request(`${MODELING_DRAFT_BASE_URL}/${id}/versions/diff`, {
+    method: 'GET',
+    params: { fromVersionNo, toVersionNo },
+  });
+}
+
+/**
+ * 对指定草稿版本执行发布前验证门禁。
+ *
+ * @param id 草稿 ID。
+ * @param data 不可变版本号和可选隔离语义翻译 SQL 预览限制。
+ * @returns 与该版本绑定的验证报告。
+ * @throws 同版本已有验证运行、版本过期、越权或系统校验失败时抛出异常。
+ */
+export function validateModelingDraft(id: number, data: ValidateModelingDraftReq): Promise<any> {
+  return request(`${MODELING_DRAFT_BASE_URL}/${id}/validate`, {
+    method: 'POST',
+    data,
+  });
+}
+
+/**
+ * 分页查询草稿验证报告。
+ *
+ * @param id 草稿 ID。
+ * @param params 页码和页大小。
+ * @returns 验证报告分页对象，通常按创建时间倒序。
+ * @throws 草稿不存在、越权或网络失败时抛出异常。
+ */
+export function getModelingValidationReports(
+  id: number,
+  params: ModelingValidationReportQueryParams = {},
+): Promise<any> {
+  return request(`${MODELING_DRAFT_BASE_URL}/${id}/validation-reports`, {
+    method: 'GET',
+    params,
+  });
+}
+
+/**
+ * 查询单份验证报告详情。
+ *
+ * @param reportId 验证报告 ID。
+ * @returns 完整验证分类结果与阻塞项。
+ * @throws 报告不存在、越权或网络失败时抛出异常。
+ */
+export function getModelingValidationReport(reportId: number): Promise<any> {
+  return request(`${MODELING_VALIDATION_REPORT_BASE_URL}/${reportId}`, {
+    method: 'GET',
+  });
+}
+
+/**
+ * 在服务端重新执行版本和验证报告门禁后提交审批。
+ *
+ * @param id 草稿 ID。
+ * @param data 当前版本号和通过门禁的报告 ID。
+ * @param idempotencyKey 当前版本与报告组合稳定复用的幂等键。
+ * @returns PENDING_APPROVAL 提交摘要；不代表已发布正式语义资产。
+ * @throws 旧报告、阻塞项、重复流程、越权或网络失败时抛出异常。
+ */
+export function submitModelingDraft(
+  id: number,
+  data: SubmitModelingDraftReq,
+  idempotencyKey: string,
+): Promise<any> {
+  return request(`${MODELING_DRAFT_BASE_URL}/${id}/submit`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+    },
+    data,
   });
 }

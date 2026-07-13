@@ -48,7 +48,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -65,21 +64,8 @@ public class ModelingDraftContextBuilder {
 
     private static final String SCHEMA_RESOURCE = "schema/semantic-modeling-draft-v1.json";
     private static final String EXAMPLE_RESOURCE = "schema/semantic-modeling-draft-v1-example.json";
-    private static final String MASKED = "[MASKED]";
     private static final int SAMPLE_VALUE_MAX_LENGTH = 256;
     private static final int EXISTING_ASSET_TOP_K_PER_TYPE = 20;
-    private static final Pattern SENSITIVE_COLUMN = Pattern
-            .compile("(?i).*(password|passwd|pwd|secret|token|credential|api[_-]?key|authorization|"
-                    + "cookie|session|phone|mobile|email|"
-                    + "id[_-]?card|ssn|address|customer[_-]?name|user[_-]?name|real[_-]?name|"
-                    + "full[_-]?name|first[_-]?name|last[_-]?name|姓名|手机号|电话|邮箱|身份证|" + "地址|密钥).*");
-    private static final Pattern SENSITIVE_VALUE = Pattern.compile(
-            "(?i)(?:1[3-9]\\d{9}|[1-9]\\d{5}(?:18|19|20)\\d{2}(?:0[1-9]|1[0-2])"
-                    + "(?:0[1-9]|[12]\\d|3[01])\\d{3}[0-9X]|[^@\\s]+@[^@\\s]+\\.[^@\\s]+|"
-                    + "bearer\\s+[A-Za-z0-9._~+/=-]+|(?:sk|rk)-[A-Za-z0-9_-]{8,}|"
-                    + "(?:eyJ[A-Za-z0-9_-]+\\.){2}[A-Za-z0-9_-]+|"
-                    + "(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|token|"
-                    + "secret|password|passwd|pwd)\\s*[:=]\\s*[\"']?[A-Za-z0-9._~+/=-]{6,})");
 
     private final ObjectMapper objectMapper;
     private final DatabaseService databaseService;
@@ -91,6 +77,7 @@ public class ModelingDraftContextBuilder {
     private final MetricService metricService;
     private final TermService termService;
     private final SemanticModelingProperties properties;
+    private final SemanticModelingSensitivityClassifier sensitivityClassifier;
     private final JsonNode schemaNode;
     private final JsonNode exampleNode;
     private final String outputContract;
@@ -108,12 +95,14 @@ public class ModelingDraftContextBuilder {
      * @param metricService 指标只读服务。
      * @param termService 术语只读服务。
      * @param properties 阶段 3 安全限制。
+     * @param sensitivityClassifier 共享敏感信息分类器。
      */
     public ModelingDraftContextBuilder(ObjectMapper objectMapper, DatabaseService databaseService,
             SemanticGapMapper gapMapper, LlmConversationGatewayService gatewayService,
             DomainService domainService, ModelService modelService,
             DimensionService dimensionService, MetricService metricService, TermService termService,
-            SemanticModelingProperties properties) {
+            SemanticModelingProperties properties,
+            SemanticModelingSensitivityClassifier sensitivityClassifier) {
         this.objectMapper = objectMapper;
         this.databaseService = databaseService;
         this.gapMapper = gapMapper;
@@ -124,6 +113,7 @@ public class ModelingDraftContextBuilder {
         this.metricService = metricService;
         this.termService = termService;
         this.properties = properties;
+        this.sensitivityClassifier = sensitivityClassifier;
         this.schemaNode = loadSchema(objectMapper);
         this.exampleNode = loadJsonResource(objectMapper, EXAMPLE_RESOURCE);
         validateExample(schemaNode, exampleNode);
@@ -642,10 +632,12 @@ public class ModelingDraftContextBuilder {
             Map<String, Object> safeRow = new LinkedHashMap<>();
             for (Map.Entry<String, Object> entry : row.entrySet()) {
                 Object value = entry.getValue();
-                if (SENSITIVE_COLUMN.matcher(StringUtils.defaultString(entry.getKey())).matches()
-                        || value != null && SENSITIVE_VALUE.matcher(value.toString()).find()) {
+                String sanitizedText =
+                        value == null ? null : sensitivityClassifier.sanitizeText(value.toString());
+                if (sensitivityClassifier.isSensitiveColumn(entry.getKey(), null) || !Objects
+                        .equals(value == null ? null : value.toString(), sanitizedText)) {
                     // 只要单元格内部含有一段敏感值就整格遮盖，避免“联系人: 邮箱”类混合文本绕过整串匹配。
-                    safeRow.put(entry.getKey(), MASKED);
+                    safeRow.put(entry.getKey(), SemanticModelingSensitivityClassifier.MASKED_TEXT);
                 } else if (value == null || value instanceof Number || value instanceof Boolean) {
                     safeRow.put(entry.getKey(), value);
                 } else {

@@ -3,8 +3,10 @@ package com.tencent.supersonic.headless.server.semantic.gap;
 /**
  * 语义缺口采集在解析上下文中使用的扩展属性键。
  *
- * <p>职责说明：集中管理 parseInfo.properties 中供阶段 2 缺口采集识别的轻量标记，避免 Chat BI parser 与执行链路之间散落魔法字符串。
- * 并发说明：本类只包含不可变常量，没有共享可写状态，不需要额外并发保护。</p>
+ * <p>
+ * 职责说明：集中管理 parseInfo.properties 中供阶段 2 缺口采集识别的轻量标记，避免 Chat BI parser 与执行链路之间散落魔法字符串。
+ * 并发说明：本类只包含不可变常量，没有共享可写状态，不需要额外并发保护。
+ * </p>
  */
 public final class SemanticGapPropertyKeys {
 

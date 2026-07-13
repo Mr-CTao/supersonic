@@ -6,8 +6,10 @@ import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticGap
 /**
  * 语义缺口服务接口。
  *
- * <p>职责说明：提供缺口事件采集、列表查询、详情、忽略、重新打开和阶段 2 草稿占位能力。并发说明：同类缺口归并必须由实现类保证
- * occurrence_count、last_seen_at 和 priority_score 的一致性。</p>
+ * <p>
+ * 职责说明：提供缺口事件采集、列表查询、详情、忽略、重新打开和阶段 2 草稿占位能力。并发说明：同类缺口归并必须由实现类保证 occurrence_count、last_seen_at 和
+ * priority_score 的一致性。
+ * </p>
  */
 public interface SemanticGapService {
 
@@ -27,8 +29,10 @@ public interface SemanticGapService {
      *
      * @param eventReq 问答失败、执行异常、用户负反馈或回退事件；调用后由后台任务消费。
      *
-     * <p>设计取舍：该方法用于 Chat BI 主链路，提交失败或任务执行失败只记录日志，不反向影响问答/反馈接口。
-     * 同步 {@link #capture(SemanticGapEventReq)} 保留给异步任务内部和单元测试直接断言。</p>
+     *        <p>
+     *        设计取舍：该方法用于 Chat BI 主链路，提交失败或任务执行失败只记录日志，不反向影响问答/反馈接口。 同步
+     *        {@link #capture(SemanticGapEventReq)} 保留给异步任务内部和单元测试直接断言。
+     *        </p>
      */
     void captureAsync(SemanticGapEventReq eventReq);
 

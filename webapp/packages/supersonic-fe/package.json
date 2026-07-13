@@ -38,8 +38,7 @@
     "start:no-ui": "cross-env UMI_UI=none max dev",
     "start:pre": "cross-env REACT_APP_ENV=pre max dev",
     "start:test": "cross-env REACT_APP_ENV=test MOCK=none max dev",
-    "pretest": "node ./tests/beforeTest",
-    "test": "max test",
+    "test": "jest --config jest.config.js",
     "test:all": "node ./tests/run-tests.js",
     "test:component": "max test ./src/components",
     "tsc": "tsc --noEmit"

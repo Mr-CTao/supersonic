@@ -39,6 +39,8 @@ public class ModelingDraftResp {
     private Integer remainingManualRegenerations;
     private Boolean canRegenerate;
     private String regenerationBlockReason;
+    /** 当前用户是否具备保存、AI 修订、验证和提交审批权限；详情接口始终返回。 */
+    private Boolean canManage;
     private JsonNode currentDraft;
     /** 兼容旧前端表单；内容与 currentDraft 相同，不含原始模型正文。 */
     private String draftJson;
@@ -50,5 +52,9 @@ public class ModelingDraftResp {
     private Date updatedAt;
     private Date generationStartedAt;
     private Date generationFinishedAt;
+    /** 阶段 4 提交待审批时绑定的最新通过报告。 */
+    private Long submittedValidationReportId;
+    private String submittedBy;
+    private Date submittedAt;
     private Boolean idempotentReplay;
 }

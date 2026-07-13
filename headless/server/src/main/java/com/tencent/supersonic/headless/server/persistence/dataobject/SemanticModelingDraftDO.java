@@ -11,9 +11,9 @@ import java.util.Date;
  * AI 语义建模草稿主记录。
  *
  * <p>
- * 职责说明：映射 {@code s2_semantic_modeling_draft}，只保存阶段 3 的隔离草稿、生成状态和 LLM
- * 审计信息。该对象不会映射或写入正式模型、维度、指标、术语表。并发说明：业务层通过 {@code lock_version} 条件更新实现乐观锁，通过生成开始时间的条件更新实现 Worker
- * 认领。
+ * 职责说明：映射 {@code s2_semantic_modeling_draft}，保存阶段 3 的隔离草稿、生成状态和 LLM 审计信息，并保存阶段 4
+ * 通过验证门禁后提交待审批的最小交接信息。该对象不会映射或写入正式模型、维度、指标、术语表。并发说明：业务层通过
+ * {@code lock_version}、当前版本号和状态条件更新实现乐观锁，通过生成开始时间的条件更新实现 Worker 认领。
  * </p>
  */
 @Data
@@ -76,6 +76,16 @@ public class SemanticModelingDraftDO {
     private String errorCode;
 
     private String errorMessage;
+
+    /** 阶段 4 提交待审批时绑定的验证报告；正式审批和发布由后续阶段实现。 */
+    private Long submittedValidationReportId;
+
+    /** 提交待审批请求的幂等键，禁止用于绕过最新草稿版本和验证报告校验。 */
+    private String submissionIdempotencyKey;
+
+    private String submittedBy;
+
+    private Date submittedAt;
 
     private String createdBy;
 

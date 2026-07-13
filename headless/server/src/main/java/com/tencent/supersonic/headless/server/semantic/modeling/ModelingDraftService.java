@@ -64,6 +64,7 @@ public class ModelingDraftService {
     private final SemanticModelingDraftAttemptMapper attemptMapper;
     private final SemanticModelingDraftVersionMapper versionMapper;
     private final com.tencent.supersonic.headless.server.service.DatabaseService databaseService;
+    private final ModelingDraftStage4PermissionService writePermissionService;
     private final ModelingDraftValidator validator;
     private final SemanticModelingProperties properties;
     private final ThreadPoolTaskExecutor executor;
@@ -79,6 +80,7 @@ public class ModelingDraftService {
      * @param attemptMapper 生成尝试 Mapper。
      * @param versionMapper 版本 Mapper。
      * @param databaseService 数据源 ACL 服务。
+     * @param writePermissionService 草稿统一写权限服务。
      * @param validator 草稿校验器。
      * @param properties 阶段 3 配置。
      * @param executor 专用有界执行器。
@@ -90,6 +92,7 @@ public class ModelingDraftService {
             SemanticModelingDraftAttemptMapper attemptMapper,
             SemanticModelingDraftVersionMapper versionMapper,
             com.tencent.supersonic.headless.server.service.DatabaseService databaseService,
+            ModelingDraftStage4PermissionService writePermissionService,
             ModelingDraftValidator validator, SemanticModelingProperties properties,
             @Qualifier("semanticModelingExecutor") ThreadPoolTaskExecutor executor,
             ObjectMapper objectMapper) {
@@ -100,6 +103,7 @@ public class ModelingDraftService {
         this.attemptMapper = attemptMapper;
         this.versionMapper = versionMapper;
         this.databaseService = databaseService;
+        this.writePermissionService = writePermissionService;
         this.validator = validator;
         this.properties = properties;
         this.executor = executor;
@@ -180,13 +184,13 @@ public class ModelingDraftService {
     public ModelingDraftResp regenerate(Long id, ModelingDraftRegenerateReq request,
             String idempotencyKey, User user) {
         validateIdempotencyKey(idempotencyKey);
-        SemanticModelingDraftDO draft = requireAccessible(id, user);
+        SemanticModelingDraftDO draft = writePermissionService.requireManageable(id, user);
         String requestFingerprint = fingerprint(regenerationFingerprintPayload(id, request));
         SemanticModelingDraftAttemptDO existing =
                 store.findAttemptByIdempotencyKey(user.getName(), idempotencyKey);
         if (existing != null) {
             store.validateRegenerationReplay(id, requestFingerprint, existing);
-            return toResponse(requireAccessible(id, user), true);
+            return toResponse(writePermissionService.requireManageable(id, user), true);
         }
         assertRegenerationPreconditions(draft);
 
@@ -260,8 +264,11 @@ public class ModelingDraftService {
         PageInfo<SemanticModelingDraftDO> page =
                 PageHelper.startPage(request.getPage(), request.getPageSize())
                         .doSelectPageInfo(() -> draftMapper.selectList(wrapper));
-        return mapPage(page,
-                page.getList().stream().map(item -> toResponse(item, false, false)).toList());
+        // 列表不逐条查询主题域/数据源管理 ACL，避免 N+1；超级管理员可直接确认写权限，
+        // 其他用户进入详情后由 canManage 精确判定并开放重生成等写入口。
+        Boolean listManageCapability = user.isSuperAdmin() ? Boolean.TRUE : null;
+        return mapPage(page, page.getList().stream()
+                .map(item -> toResponse(item, false, false, listManageCapability)).toList());
     }
 
     /**
@@ -273,7 +280,8 @@ public class ModelingDraftService {
      */
     public ModelingDraftResp get(Long id, User user) {
         recoverStaleGenerations();
-        return toResponse(requireAccessible(id, user), false);
+        SemanticModelingDraftDO draft = requireAccessible(id, user);
+        return toResponse(draft, false, true, writePermissionService.canManage(draft, user));
     }
 
     /**
@@ -283,9 +291,10 @@ public class ModelingDraftService {
      * @param request 保存请求。
      * @param user 当前用户。
      * @return 保存后的草稿。
+     * @throws ModelingDraftException 草稿状态、管理权限、版本或结构化内容不满足保存约束。
      */
     public ModelingDraftResp save(Long id, ModelingDraftSaveReq request, User user) {
-        SemanticModelingDraftDO draft = requireAccessible(id, user);
+        SemanticModelingDraftDO draft = writePermissionService.requireManageable(id, user);
         if (!ModelingDraftConstants.STATUS_DRAFT.equals(draft.getStatus())) {
             throw new ModelingDraftException(HttpStatus.CONFLICT,
                     ModelingDraftConstants.ERROR_CONFLICT, "只有生成成功的 DRAFT 状态可以保存");
@@ -299,7 +308,9 @@ public class ModelingDraftService {
                 context.existingNames());
         SemanticModelingDraftDO saved = store.saveVersion(draft, request.getLockVersion(),
                 validated.json(), request.getChangeSummary(), user);
-        return toResponse(saved, false);
+        // 本请求已由 requireManageable 完成服务端授权，保存不会改变数据源/主题域绑定；响应必须保留
+        // 明确的管理能力，否则前端用完整响应替换详情后会被临时降为只读。后续写请求仍会重新鉴权。
+        return toResponse(saved, false, true, Boolean.TRUE);
     }
 
     /**
@@ -320,6 +331,15 @@ public class ModelingDraftService {
                 .startPage(safePage, safePageSize)
                 .doSelectPageInfo(() -> versionMapper
                         .selectList(new LambdaQueryWrapper<SemanticModelingDraftVersionDO>()
+                                // 历史列表只读取摘要列；完整 draft_json 仅在按版本查看或比较时单条加载，
+                                // 避免 50 个大 JSON 快照同时进入 JVM 内存。
+                                .select(SemanticModelingDraftVersionDO::getId,
+                                        SemanticModelingDraftVersionDO::getDraftId,
+                                        SemanticModelingDraftVersionDO::getVersionNo,
+                                        SemanticModelingDraftVersionDO::getChangeSource,
+                                        SemanticModelingDraftVersionDO::getChangeSummary,
+                                        SemanticModelingDraftVersionDO::getCreatedBy,
+                                        SemanticModelingDraftVersionDO::getCreatedAt)
                                 .eq(SemanticModelingDraftVersionDO::getDraftId, draftId)
                                 .orderByDesc(SemanticModelingDraftVersionDO::getVersionNo)));
         List<ModelingDraftVersionResp> responses = result.getList().stream()
@@ -519,12 +539,18 @@ public class ModelingDraftService {
 
     /** 转换主记录，刻意排除 rawOutput 和 repairedOutput。 */
     private ModelingDraftResp toResponse(SemanticModelingDraftDO draft, boolean replay) {
-        return toResponse(draft, replay, true);
+        return toResponse(draft, replay, true, null);
     }
 
     /** 转换主记录，并允许列表场景省略大 JSON 快照。 */
     private ModelingDraftResp toResponse(SemanticModelingDraftDO draft, boolean replay,
             boolean includeDraft) {
+        return toResponse(draft, replay, includeDraft, null);
+    }
+
+    /** 转换主记录，并在详情场景返回当前用户的服务端写权限判定。 */
+    private ModelingDraftResp toResponse(SemanticModelingDraftDO draft, boolean replay,
+            boolean includeDraft, Boolean canManage) {
         JsonNode currentDraft = includeDraft ? readTree(draft.getDraftJson()) : null;
         int currentAttemptNo = Objects.requireNonNullElse(draft.getCurrentAttemptNo(), 1);
         int manualRegenerationCount = Math.max(0, currentAttemptNo - 1);
@@ -549,14 +575,16 @@ public class ModelingDraftService {
                 .currentVersion(draft.getCurrentVersionNo()).lockVersion(draft.getLockVersion())
                 .currentAttemptNo(currentAttemptNo).manualRegenerationCount(manualRegenerationCount)
                 .remainingManualRegenerations(remaining).canRegenerate(canRegenerate)
-                .regenerationBlockReason(regenerationBlockReason).currentDraft(currentDraft)
-                .draftJson(includeDraft ? draft.getDraftJson() : null)
+                .regenerationBlockReason(regenerationBlockReason).canManage(canManage)
+                .currentDraft(currentDraft).draftJson(includeDraft ? draft.getDraftJson() : null)
                 .errorCode(draft.getErrorCode()).errorMessage(draft.getErrorMessage())
                 .createdBy(draft.getCreatedBy()).createdAt(draft.getCreatedAt())
                 .updatedBy(draft.getUpdatedBy()).updatedAt(draft.getUpdatedAt())
                 .generationStartedAt(draft.getGenerationStartedAt())
-                .generationFinishedAt(draft.getGenerationFinishedAt()).idempotentReplay(replay)
-                .build();
+                .generationFinishedAt(draft.getGenerationFinishedAt())
+                .submittedValidationReportId(draft.getSubmittedValidationReportId())
+                .submittedBy(draft.getSubmittedBy()).submittedAt(draft.getSubmittedAt())
+                .idempotentReplay(replay).build();
     }
 
     /**

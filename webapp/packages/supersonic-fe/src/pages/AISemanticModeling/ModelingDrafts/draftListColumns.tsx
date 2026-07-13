@@ -26,12 +26,14 @@ const STATUS_TEXT: Record<ModelingDraftStatus, string> = {
   GENERATING: '生成中',
   DRAFT: '草稿',
   GENERATION_FAILED: '生成失败',
+  PENDING_APPROVAL: '待审批',
 };
 
 const STATUS_COLOR: Record<ModelingDraftStatus, string> = {
   GENERATING: 'processing',
   DRAFT: 'blue',
   GENERATION_FAILED: 'error',
+  PENDING_APPROVAL: 'success',
 };
 
 type Params = {
@@ -167,7 +169,7 @@ export function createDraftListColumns({
                 onClick={() => onOpenDetail(record)}
               />
             </Tooltip>
-            {record.status === 'GENERATION_FAILED' ? (
+            {record.status === 'GENERATION_FAILED' && record.canManage === true ? (
               <Tooltip title={availability.reason}>
                 <span className={styles.tooltipButtonWrapper}>
                   <Button
