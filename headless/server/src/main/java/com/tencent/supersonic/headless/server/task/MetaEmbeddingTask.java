@@ -20,6 +20,14 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+/**
+ * 语义元数据向量刷新与内存索引持久化任务。
+ *
+ * <p>
+ * 职责说明：定时刷新维度/指标 embedding，并为阶段 5 提供可感知失败的严格入口。并发说明： 共享向量存储由 {@link EmbeddingService}
+ * 实现负责线程安全，本类不保留请求级可变状态。
+ * </p>
+ */
 @Component
 @Slf4j
 @Order(2)
@@ -37,6 +45,7 @@ public class MetaEmbeddingTask implements CommandLineRunner {
     @Autowired
     private DimensionService dimensionService;
 
+    /** 应用退出前持久化内存向量存储；非内存实现无需处理。 */
     @PreDestroy
     public void onShutdown() {
         embeddingStorePersistFile();
@@ -52,24 +61,18 @@ public class MetaEmbeddingTask implements CommandLineRunner {
         }
     }
 
+    /** 定时持久化内存向量存储，防止进程退出造成索引丢失。 */
     @Scheduled(cron = "${s2.inMemoryEmbeddingStore.persist.cron:0 0 * * * ?}")
     public void executePersistFileTask() {
         embeddingStorePersistFile();
     }
 
-    /** * reload meta embedding */
+    /** 定时容错刷新元数据 embedding；失败只记录日志。 */
     @Scheduled(cron = "${s2.reload.meta.embedding.corn:0 0 */2 * * ?}")
     public void reloadMetaEmbedding() {
         long startTime = System.currentTimeMillis();
         try {
-            List<DataItem> metricDataItems = metricService.getDataEvent().getDataItems();
-
-            embeddingService.addQuery(embeddingConfig.getMetaCollectionName(),
-                    TextSegmentConvert.convertToEmbedding(metricDataItems));
-
-            List<DataItem> dimensionDataItems = dimensionService.getAllDataEvents().getDataItems();
-            embeddingService.addQuery(embeddingConfig.getMetaCollectionName(),
-                    TextSegmentConvert.convertToEmbedding(dimensionDataItems));
+            reloadMetaEmbeddingOrThrow();
         } catch (Exception e) {
             log.error("Failed to reload meta embedding.", e);
         }
@@ -77,6 +80,31 @@ public class MetaEmbeddingTask implements CommandLineRunner {
         log.info("Embedding has been regularly reloaded  in {} milliseconds", duration);
     }
 
+    /**
+     * 严格重建维度与指标 embedding，并向调用方传播失败。
+     *
+     * <p>
+     * 调用示例：{@code metaEmbeddingTask.reloadMetaEmbeddingOrThrow()}。发布与回滚编排使用该入口
+     * 将刷新结果独立写入发布记录；任一数据事件读取或向量写入失败都视为本步骤失败。
+     * </p>
+     *
+     * @throws RuntimeException 数据事件构造或向量存储写入失败时原样传播。
+     */
+    public void reloadMetaEmbeddingOrThrow() {
+        List<DataItem> metricDataItems = metricService.getDataEvent().getDataItems();
+        embeddingService.addQuery(embeddingConfig.getMetaCollectionName(),
+                TextSegmentConvert.convertToEmbedding(metricDataItems));
+
+        List<DataItem> dimensionDataItems = dimensionService.getAllDataEvents().getDataItems();
+        embeddingService.addQuery(embeddingConfig.getMetaCollectionName(),
+                TextSegmentConvert.convertToEmbedding(dimensionDataItems));
+    }
+
+    /**
+     * 应用启动时触发一次容错 embedding 刷新。
+     *
+     * @param args 启动参数，本任务不读取该参数。
+     */
     @Override
     public void run(String... args) throws Exception {
         try {

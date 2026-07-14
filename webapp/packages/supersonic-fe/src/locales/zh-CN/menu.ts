@@ -23,6 +23,7 @@ export default {
   'menu.aiSemanticModeling': 'AI语义建模',
   'menu.aiSemanticModeling.semanticGapPool': '语义缺口池',
   'menu.aiSemanticModeling.modelingDrafts': '建模草稿',
+  'menu.aiSemanticModeling.releaseAudit': '发布审计',
   'menu.chatSetting': '问答设置',
   'menu.plugin': '插件管理',
   'menu.login': '登录',

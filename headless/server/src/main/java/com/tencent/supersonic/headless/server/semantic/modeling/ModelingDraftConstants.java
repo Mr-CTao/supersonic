@@ -6,7 +6,8 @@ import java.util.Set;
  * AI 语义建模草稿模块常量。
  *
  * <p>
- * 职责说明：集中定义阶段 3 草稿与阶段 4 校准、验证门禁使用的状态、来源、允许的指标聚合和错误码， 避免业务逻辑散落魔法字符串。本类只包含不可变常量，不持有共享可变状态，因此无需额外并发保护。
+ * 职责说明：集中定义阶段 3 草稿、阶段 4 校准验证门禁和阶段 5 治理交接使用的状态、来源、允许的指标聚合和错误码，
+ * 避免业务逻辑散落魔法字符串。本类只包含不可变常量，不持有共享可变状态，因此无需额外并发保护。
  * </p>
  */
 public final class ModelingDraftConstants {
@@ -18,6 +19,12 @@ public final class ModelingDraftConstants {
     public static final String STATUS_DRAFT = "DRAFT";
     public static final String STATUS_GENERATION_FAILED = "GENERATION_FAILED";
     public static final String STATUS_PENDING_APPROVAL = "PENDING_APPROVAL";
+    public static final String STATUS_APPROVED = "APPROVED";
+    public static final String STATUS_REJECTED = "REJECTED";
+    public static final String STATUS_RELEASING = "RELEASING";
+    public static final String STATUS_RELEASE_FAILED = "RELEASE_FAILED";
+    public static final String STATUS_RELEASED = "RELEASED";
+    public static final String STATUS_ROLLED_BACK = "ROLLED_BACK";
 
     public static final String ATTEMPT_TRIGGER_INITIAL = "INITIAL";
     public static final String ATTEMPT_TRIGGER_MANUAL_REGENERATION = "MANUAL_REGENERATION";

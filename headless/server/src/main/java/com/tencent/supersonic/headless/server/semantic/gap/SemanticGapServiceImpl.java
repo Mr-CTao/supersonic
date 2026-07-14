@@ -213,6 +213,59 @@ public class SemanticGapServiceImpl implements SemanticGapService {
     }
 
     /**
+     * 将关联语义缺口标记为已发布。
+     *
+     * <p>
+     * 发布成功是权威治理结果，因此允许从现有非终态推进；重复调用仅刷新审计时间，不会产生 新缺口。更新条件绑定主键，所有输入通过 MyBatis 参数化处理。
+     * </p>
+     *
+     * @param id 缺口 ID。
+     * @param operator 发布管理员。
+     */
+    @Override
+    public void markReleased(Long id, String operator) {
+        SemanticGapDO gap = requireGap(id);
+        Date now = new Date();
+        String updatedBy = StringUtils.defaultIfBlank(operator, SYSTEM_CREATOR);
+        LambdaUpdateWrapper<SemanticGapDO> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(SemanticGapDO::getId, gap.getId())
+                .set(SemanticGapDO::getStatus, SemanticGapStatus.RELEASED.name())
+                .set(SemanticGapDO::getIgnoreReason, null).set(SemanticGapDO::getUpdatedAt, now)
+                .set(SemanticGapDO::getUpdatedBy, updatedBy);
+        if (semanticGapMapper.update(null, wrapper) != 1) {
+            throw new IllegalStateException("semantic gap release status update failed");
+        }
+    }
+
+    /**
+     * 在关联 AI 新增对象完整回滚后重新打开缺口。
+     *
+     * <p>
+     * 只允许 RELEASED 转为 REOPENED，防止回滚重放覆盖管理员对其他状态的并发处理。
+     * </p>
+     *
+     * @param id 缺口 ID。
+     * @param operator 回滚管理员。
+     */
+    @Override
+    public void markReopenedAfterRollback(Long id, String operator) {
+        Date now = new Date();
+        String updatedBy = StringUtils.defaultIfBlank(operator, SYSTEM_CREATOR);
+        LambdaUpdateWrapper<SemanticGapDO> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(SemanticGapDO::getId, id)
+                .eq(SemanticGapDO::getStatus, SemanticGapStatus.RELEASED.name())
+                .set(SemanticGapDO::getStatus, SemanticGapStatus.REOPENED.name())
+                .set(SemanticGapDO::getUpdatedAt, now).set(SemanticGapDO::getUpdatedBy, updatedBy);
+        int updated = semanticGapMapper.update(null, wrapper);
+        if (updated == 0) {
+            SemanticGapDO current = requireGap(id);
+            if (!SemanticGapStatus.REOPENED.name().equals(current.getStatus())) {
+                throw new IllegalStateException("semantic gap rollback status changed");
+            }
+        }
+    }
+
+    /**
      * 阶段 2 草稿占位入口。
      *
      * @param id 缺口 ID。

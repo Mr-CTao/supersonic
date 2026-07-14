@@ -273,6 +273,13 @@ const ROUTES = [
         component: './AISemanticModeling/ModelingDrafts',
         envEnableList: [ENV_KEY.SEMANTIC],
       },
+      {
+        path: '/ai-semantic-modeling/releases',
+        name: 'releaseAudit',
+        component: './AISemanticModeling/ReleaseAudit',
+        envEnableList: [ENV_KEY.SEMANTIC],
+        access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
+      },
     ],
   },
   {

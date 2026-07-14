@@ -22,7 +22,17 @@ const SEMANTIC_GAP_BASE_URL = '/api/semantic/gaps';
 export const MODELING_DRAFT_REVISION_INSTRUCTION_MAX_LENGTH = 2000;
 
 export type ModelingDraftSourceType = 'SEMANTIC_GAP' | 'DATA_SOURCE';
-export type ModelingDraftStatus = 'GENERATING' | 'DRAFT' | 'GENERATION_FAILED' | 'PENDING_APPROVAL';
+export type ModelingDraftStatus =
+  | 'GENERATING'
+  | 'DRAFT'
+  | 'GENERATION_FAILED'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'RELEASING'
+  | 'RELEASE_FAILED'
+  | 'RELEASED'
+  | 'ROLLED_BACK';
 export type ModelingDraftAttemptStatus =
   | 'QUEUED'
   | 'GENERATING'

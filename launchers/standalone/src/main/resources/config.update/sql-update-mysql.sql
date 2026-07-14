@@ -800,3 +800,100 @@ CREATE TABLE IF NOT EXISTS `s2_semantic_validation_report` (
     KEY `idx_semantic_validation_draft` (`draft_id`, `id`),
     KEY `idx_semantic_validation_version_status` (`draft_version_id`, `status`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI语义建模隔离草稿验证报告，不写正式语义资产';
+
+-- 20260714 phase 5 approval and auditable release orchestration.
+SET @stage5_ddl = IF(
+    EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE()
+        AND table_name = 's2_semantic_modeling_draft' AND column_name = 'approved_by'),
+    'DO 0',
+    'ALTER TABLE `s2_semantic_modeling_draft` ADD COLUMN `approved_by` varchar(100) DEFAULT NULL AFTER `submitted_at`'
+);
+PREPARE stage5_stmt FROM @stage5_ddl;
+EXECUTE stage5_stmt;
+DEALLOCATE PREPARE stage5_stmt;
+SET @stage5_ddl = IF(
+    EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE()
+        AND table_name = 's2_semantic_modeling_draft' AND column_name = 'approved_at'),
+    'DO 0',
+    'ALTER TABLE `s2_semantic_modeling_draft` ADD COLUMN `approved_at` datetime DEFAULT NULL AFTER `approved_by`'
+);
+PREPARE stage5_stmt FROM @stage5_ddl;
+EXECUTE stage5_stmt;
+DEALLOCATE PREPARE stage5_stmt;
+SET @stage5_ddl = IF(
+    EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE()
+        AND table_name = 's2_semantic_modeling_draft' AND column_name = 'approval_reason'),
+    'DO 0',
+    'ALTER TABLE `s2_semantic_modeling_draft` ADD COLUMN `approval_reason` varchar(1000) DEFAULT NULL AFTER `approved_at`'
+);
+PREPARE stage5_stmt FROM @stage5_ddl;
+EXECUTE stage5_stmt;
+DEALLOCATE PREPARE stage5_stmt;
+SET @stage5_ddl = IF(
+    EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE()
+        AND table_name = 's2_semantic_modeling_draft' AND column_name = 'rejected_by'),
+    'DO 0',
+    'ALTER TABLE `s2_semantic_modeling_draft` ADD COLUMN `rejected_by` varchar(100) DEFAULT NULL AFTER `approval_reason`'
+);
+PREPARE stage5_stmt FROM @stage5_ddl;
+EXECUTE stage5_stmt;
+DEALLOCATE PREPARE stage5_stmt;
+SET @stage5_ddl = IF(
+    EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE()
+        AND table_name = 's2_semantic_modeling_draft' AND column_name = 'rejected_at'),
+    'DO 0',
+    'ALTER TABLE `s2_semantic_modeling_draft` ADD COLUMN `rejected_at` datetime DEFAULT NULL AFTER `rejected_by`'
+);
+PREPARE stage5_stmt FROM @stage5_ddl;
+EXECUTE stage5_stmt;
+DEALLOCATE PREPARE stage5_stmt;
+SET @stage5_ddl = NULL;
+
+CREATE TABLE IF NOT EXISTS `s2_semantic_release` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `release_no` varchar(64) NOT NULL,
+    `draft_id` bigint NOT NULL,
+    `draft_version_id` bigint NOT NULL,
+    `draft_version_no` int NOT NULL,
+    `validation_report_id` bigint NOT NULL,
+    `release_status` varchar(32) NOT NULL,
+    `released_objects` mediumtext NOT NULL,
+    `dict_reload_status` varchar(32) NOT NULL,
+    `embedding_reload_status` varchar(32) NOT NULL,
+    `approved_by` varchar(100) NOT NULL,
+    `released_by` varchar(100) NOT NULL,
+    `released_at` datetime DEFAULT NULL,
+    `rollback_from_release_id` bigint DEFAULT NULL,
+    `rollback_reason` varchar(1000) DEFAULT NULL,
+    `rolled_back_by` varchar(100) DEFAULT NULL,
+    `rolled_back_at` datetime DEFAULT NULL,
+    `error_message` varchar(1000) DEFAULT NULL,
+    `idempotency_key` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    `created_at` datetime NOT NULL,
+    `updated_at` datetime NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_semantic_release_no` (`release_no`),
+    UNIQUE KEY `uk_semantic_release_draft` (`draft_id`),
+    KEY `idx_semantic_release_status` (`release_status`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI语义建模发布与知识刷新审计';
+
+CREATE TABLE IF NOT EXISTS `s2_semantic_release_step` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `release_id` bigint NOT NULL,
+    `step_key` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    `step_type` varchar(64) NOT NULL,
+    `target_type` varchar(32) NOT NULL,
+    `target_key` varchar(255) DEFAULT NULL,
+    `target_name` varchar(255) DEFAULT NULL,
+    `target_id` bigint DEFAULT NULL,
+    `status` varchar(32) NOT NULL,
+    `attempt_count` int NOT NULL DEFAULT 1,
+    `error_message` varchar(1000) DEFAULT NULL,
+    `started_at` datetime DEFAULT NULL,
+    `finished_at` datetime DEFAULT NULL,
+    `created_at` datetime NOT NULL,
+    `updated_at` datetime NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_semantic_release_step` (`release_id`, `step_key`),
+    KEY `idx_semantic_release_step_list` (`release_id`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI语义发布逐步骤结果';

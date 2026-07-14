@@ -298,11 +298,26 @@ CREATE TABLE IF NOT EXISTS s2_semantic_modeling_draft (
     submission_idempotency_key varchar(128) DEFAULT NULL,
     submitted_by varchar(100) DEFAULT NULL,
     submitted_at timestamp DEFAULT NULL,
+    approved_by varchar(100) DEFAULT NULL,
+    approved_at timestamp DEFAULT NULL,
+    approval_reason varchar(1000) DEFAULT NULL,
+    rejected_by varchar(100) DEFAULT NULL,
+    rejected_at timestamp DEFAULT NULL,
     created_by varchar(100) NOT NULL,
     created_at timestamp NOT NULL,
     updated_by varchar(100) NOT NULL,
     updated_at timestamp NOT NULL
 );
+
+-- Existing PostgreSQL installations keep the phase 3 table when CREATE TABLE IF NOT EXISTS
+-- runs. Add phase 5 approval columns separately so normal application startup also performs
+-- the backward-compatible schema upgrade instead of leaving the Java mapper ahead of the DB.
+ALTER TABLE s2_semantic_modeling_draft
+    ADD COLUMN IF NOT EXISTS approved_by varchar(100) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS approved_at timestamp DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS approval_reason varchar(1000) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS rejected_by varchar(100) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS rejected_at timestamp DEFAULT NULL;
 
 COMMENT ON TABLE s2_semantic_modeling_draft IS
     'Isolated AI semantic modeling draft; phase 4 may mark PENDING_APPROVAL but never writes formal semantic assets';
@@ -437,6 +452,63 @@ CREATE TABLE IF NOT EXISTS s2_semantic_validation_report (
     created_at timestamp NOT NULL,
     finished_at timestamp DEFAULT NULL
 );
+
+-- Phase 5 publishes only AI-created objects through existing semantic management services.
+CREATE TABLE IF NOT EXISTS s2_semantic_release (
+    id BIGSERIAL PRIMARY KEY,
+    release_no varchar(64) NOT NULL,
+    draft_id bigint NOT NULL,
+    draft_version_id bigint NOT NULL,
+    draft_version_no integer NOT NULL,
+    validation_report_id bigint NOT NULL,
+    release_status varchar(32) NOT NULL,
+    released_objects text NOT NULL,
+    dict_reload_status varchar(32) NOT NULL,
+    embedding_reload_status varchar(32) NOT NULL,
+    approved_by varchar(100) NOT NULL,
+    released_by varchar(100) NOT NULL,
+    released_at timestamp DEFAULT NULL,
+    rollback_from_release_id bigint DEFAULT NULL,
+    rollback_reason varchar(1000) DEFAULT NULL,
+    rolled_back_by varchar(100) DEFAULT NULL,
+    rolled_back_at timestamp DEFAULT NULL,
+    error_message varchar(1000) DEFAULT NULL,
+    idempotency_key varchar(128) NOT NULL,
+    created_at timestamp NOT NULL,
+    updated_at timestamp NOT NULL
+);
+COMMENT ON TABLE s2_semantic_release IS
+    'Auditable AI semantic release with independent dict and embedding refresh states';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_semantic_release_no
+    ON s2_semantic_release (release_no);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_semantic_release_draft
+    ON s2_semantic_release (draft_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_release_status
+    ON s2_semantic_release (release_status, id DESC);
+
+CREATE TABLE IF NOT EXISTS s2_semantic_release_step (
+    id BIGSERIAL PRIMARY KEY,
+    release_id bigint NOT NULL,
+    step_key varchar(255) NOT NULL,
+    step_type varchar(64) NOT NULL,
+    target_type varchar(32) NOT NULL,
+    target_key varchar(255) DEFAULT NULL,
+    target_name varchar(255) DEFAULT NULL,
+    target_id bigint DEFAULT NULL,
+    status varchar(32) NOT NULL,
+    attempt_count integer NOT NULL DEFAULT 1,
+    error_message varchar(1000) DEFAULT NULL,
+    started_at timestamp DEFAULT NULL,
+    finished_at timestamp DEFAULT NULL,
+    created_at timestamp NOT NULL,
+    updated_at timestamp NOT NULL
+);
+COMMENT ON TABLE s2_semantic_release_step IS
+    'Idempotent per-object, knowledge refresh and rollback steps for AI semantic releases';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_semantic_release_step
+    ON s2_semantic_release_step (release_id, step_key);
+CREATE INDEX IF NOT EXISTS idx_semantic_release_step_list
+    ON s2_semantic_release_step (release_id, id);
 
 COMMENT ON TABLE s2_semantic_validation_report IS
     'Phase 4 validation reports for isolated drafts; no approval, publication or formal semantic asset writes';

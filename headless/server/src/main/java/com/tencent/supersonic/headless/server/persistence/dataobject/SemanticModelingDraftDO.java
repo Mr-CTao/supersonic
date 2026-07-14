@@ -12,7 +12,7 @@ import java.util.Date;
  *
  * <p>
  * 职责说明：映射 {@code s2_semantic_modeling_draft}，保存阶段 3 的隔离草稿、生成状态和 LLM 审计信息，并保存阶段 4
- * 通过验证门禁后提交待审批的最小交接信息。该对象不会映射或写入正式模型、维度、指标、术语表。并发说明：业务层通过
+ * 通过验证门禁后提交待审批的最小交接信息，并承载阶段 5 审批与发布状态。该对象不会直接映射或写入正式模型、维度、指标、术语表。并发说明：业务层通过
  * {@code lock_version}、当前版本号和状态条件更新实现乐观锁，通过生成开始时间的条件更新实现 Worker 认领。
  * </p>
  */
@@ -86,6 +86,18 @@ public class SemanticModelingDraftDO {
     private String submittedBy;
 
     private Date submittedAt;
+
+    /** 阶段 5 审批人；只有系统管理员审批通过后才允许进入发布编排。 */
+    private String approvedBy;
+
+    private Date approvedAt;
+
+    /** 审批通过备注或拒绝原因；返回管理端前仍按普通业务文本处理。 */
+    private String approvalReason;
+
+    private String rejectedBy;
+
+    private Date rejectedAt;
 
     private String createdBy;
 

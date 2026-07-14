@@ -14,7 +14,7 @@ import java.util.Date;
  *
  * <p>
  * 职责说明：除 MyBatis-Plus 基础查询外，仅暴露生成认领、幂等读取、乐观锁保存、AI 修订版本写入和提交待审批所需的原子 SQL。 所有 SQL
- * 都使用绑定参数，且不会写入正式语义资产表。并发说明：条件更新由数据库原子执行，不依赖 JVM 本地锁，适用于多实例部署。
+ * 都使用绑定参数，且不会直接写入正式语义资产表。并发说明：条件更新由数据库原子执行，不依赖 JVM 本地锁，适用于多实例部署。
  * </p>
  */
 @Mapper
@@ -151,4 +151,82 @@ public interface SemanticModelingDraftMapper extends BaseMapper<SemanticModeling
             @Param("validationReportId") Long validationReportId,
             @Param("idempotencyKey") String idempotencyKey,
             @Param("submittedBy") String submittedBy, @Param("submittedAt") Date submittedAt);
+
+    /**
+     * 原子审批通过待审批草稿。
+     *
+     * @param id 草稿 ID。
+     * @param approvedBy 审批管理员。
+     * @param approvedAt 审批时间。
+     * @param reason 可选审批备注。
+     * @return 1 表示审批成功，0 表示状态已变化。
+     */
+    @Update("UPDATE s2_semantic_modeling_draft SET status = 'APPROVED', "
+            + "approved_by = #{approvedBy}, approved_at = #{approvedAt}, "
+            + "approval_reason = #{reason}, rejected_by = NULL, rejected_at = NULL, "
+            + "lock_version = lock_version + 1, updated_by = #{approvedBy}, "
+            + "updated_at = #{approvedAt} WHERE id = #{id} AND status = 'PENDING_APPROVAL'")
+    int approve(@Param("id") Long id, @Param("approvedBy") String approvedBy,
+            @Param("approvedAt") Date approvedAt, @Param("reason") String reason);
+
+    /**
+     * 原子拒绝待审批草稿。
+     *
+     * @param id 草稿 ID。
+     * @param rejectedBy 拒绝管理员。
+     * @param rejectedAt 拒绝时间。
+     * @param reason 必填拒绝原因。
+     * @return 1 表示拒绝成功，0 表示状态已变化。
+     */
+    @Update("UPDATE s2_semantic_modeling_draft SET status = 'REJECTED', "
+            + "approval_reason = #{reason}, rejected_by = #{rejectedBy}, "
+            + "rejected_at = #{rejectedAt}, approved_by = NULL, approved_at = NULL, "
+            + "lock_version = lock_version + 1, updated_by = #{rejectedBy}, "
+            + "updated_at = #{rejectedAt} WHERE id = #{id} AND status = 'PENDING_APPROVAL'")
+    int reject(@Param("id") Long id, @Param("rejectedBy") String rejectedBy,
+            @Param("rejectedAt") Date rejectedAt, @Param("reason") String reason);
+
+    /**
+     * 在发布记录已持久化后把草稿标记为发布中。
+     *
+     * @param id 草稿 ID。
+     * @param updatedBy 发布人。
+     * @param updatedAt 更新时间。
+     * @return 1 表示推进成功，0 表示审批状态已变化。
+     */
+    @Update("UPDATE s2_semantic_modeling_draft SET status = 'RELEASING', "
+            + "lock_version = lock_version + 1, updated_by = #{updatedBy}, "
+            + "updated_at = #{updatedAt} WHERE id = #{id} AND status IN "
+            + "('APPROVED', 'RELEASE_FAILED', 'RELEASING')")
+    int markReleasing(@Param("id") Long id, @Param("updatedBy") String updatedBy,
+            @Param("updatedAt") Date updatedAt);
+
+    /**
+     * 按当前发布中状态写入发布终态，避免覆盖后续人工治理操作。
+     *
+     * @param id 草稿 ID。
+     * @param status RELEASED 或 RELEASE_FAILED。
+     * @param updatedBy 操作者。
+     * @param updatedAt 更新时间。
+     * @return 受影响行数。
+     */
+    @Update("UPDATE s2_semantic_modeling_draft SET status = #{status}, "
+            + "lock_version = lock_version + 1, updated_by = #{updatedBy}, "
+            + "updated_at = #{updatedAt} WHERE id = #{id} AND status = 'RELEASING'")
+    int finishRelease(@Param("id") Long id, @Param("status") String status,
+            @Param("updatedBy") String updatedBy, @Param("updatedAt") Date updatedAt);
+
+    /**
+     * 回滚成功后把已发布草稿标记为已回滚。
+     *
+     * @param id 草稿 ID。
+     * @param updatedBy 回滚管理员。
+     * @param updatedAt 回滚时间。
+     * @return 受影响行数。
+     */
+    @Update("UPDATE s2_semantic_modeling_draft SET status = 'ROLLED_BACK', "
+            + "lock_version = lock_version + 1, updated_by = #{updatedBy}, "
+            + "updated_at = #{updatedAt} WHERE id = #{id} AND status = 'RELEASED'")
+    int markRolledBack(@Param("id") Long id, @Param("updatedBy") String updatedBy,
+            @Param("updatedAt") Date updatedAt);
 }

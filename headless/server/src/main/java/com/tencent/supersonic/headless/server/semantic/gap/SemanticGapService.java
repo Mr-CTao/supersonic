@@ -72,6 +72,26 @@ public interface SemanticGapService {
     SemanticGapDO reopen(Long id, String operator);
 
     /**
+     * 在关联 AI 语义资产完整发布后把缺口标记为已发布。
+     *
+     * <p>
+     * 该操作由阶段 5 发布编排调用，重复调用保持 RELEASED，不向客户端开放任意状态写入。
+     * </p>
+     *
+     * @param id 缺口 ID。
+     * @param operator 发布管理员。
+     */
+    void markReleased(Long id, String operator);
+
+    /**
+     * 在关联 AI 新增对象完整回滚后将缺口重新放回治理队列。
+     *
+     * @param id 缺口 ID。
+     * @param operator 回滚管理员。
+     */
+    void markReopenedAfterRollback(Long id, String operator);
+
+    /**
      * 阶段 2 草稿占位入口。
      *
      * @param id 缺口 ID。

@@ -308,6 +308,11 @@ CREATE TABLE IF NOT EXISTS `s2_semantic_modeling_draft` (
         COMMENT '提交待审批请求幂等键（大小写敏感）',
     `submitted_by` varchar(100) DEFAULT NULL COMMENT '提交待审批人',
     `submitted_at` datetime DEFAULT NULL COMMENT '提交待审批时间',
+    `approved_by` varchar(100) DEFAULT NULL COMMENT '审批通过人',
+    `approved_at` datetime DEFAULT NULL COMMENT '审批通过时间',
+    `approval_reason` varchar(1000) DEFAULT NULL COMMENT '审批备注或拒绝原因',
+    `rejected_by` varchar(100) DEFAULT NULL COMMENT '审批拒绝人',
+    `rejected_at` datetime DEFAULT NULL COMMENT '审批拒绝时间',
     `created_by` varchar(100) NOT NULL COMMENT '创建人',
     `created_at` datetime NOT NULL COMMENT '创建时间',
     `updated_by` varchar(100) NOT NULL COMMENT '最近更新人',
@@ -430,6 +435,57 @@ CREATE TABLE IF NOT EXISTS `s2_semantic_validation_report` (
     KEY `idx_semantic_validation_draft` (`draft_id`, `id`),
     KEY `idx_semantic_validation_version_status` (`draft_version_id`, `status`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI语义建模隔离草稿验证报告，不写正式语义资产';
+
+-- AI semantic modeling phase 5: auditable publication through existing semantic services.
+CREATE TABLE IF NOT EXISTS `s2_semantic_release` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'AI语义发布ID',
+    `release_no` varchar(64) NOT NULL COMMENT '发布版本号',
+    `draft_id` bigint NOT NULL COMMENT '关联草稿ID',
+    `draft_version_id` bigint NOT NULL COMMENT '发布的不可变草稿版本ID',
+    `draft_version_no` int NOT NULL COMMENT '发布的草稿版本号',
+    `validation_report_id` bigint NOT NULL COMMENT '发布绑定的通过验证报告ID',
+    `release_status` varchar(32) NOT NULL COMMENT 'IN_PROGRESS、SUCCEEDED、FAILED或回滚状态',
+    `released_objects` mediumtext NOT NULL COMMENT '已创建对象安全摘要JSON',
+    `dict_reload_status` varchar(32) NOT NULL COMMENT 'dict独立刷新状态',
+    `embedding_reload_status` varchar(32) NOT NULL COMMENT 'embedding独立刷新状态',
+    `approved_by` varchar(100) NOT NULL COMMENT '审批人',
+    `released_by` varchar(100) NOT NULL COMMENT '发布人',
+    `released_at` datetime DEFAULT NULL COMMENT '完整发布时间',
+    `rollback_from_release_id` bigint DEFAULT NULL COMMENT '预留回滚来源发布ID',
+    `rollback_reason` varchar(1000) DEFAULT NULL COMMENT '回滚原因',
+    `rolled_back_by` varchar(100) DEFAULT NULL COMMENT '回滚人',
+    `rolled_back_at` datetime DEFAULT NULL COMMENT '完整回滚时间',
+    `error_message` varchar(1000) DEFAULT NULL COMMENT '脱敏失败摘要',
+    `idempotency_key` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL
+        COMMENT '发布请求幂等键（大小写敏感）',
+    `created_at` datetime NOT NULL COMMENT '创建时间',
+    `updated_at` datetime NOT NULL COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_semantic_release_no` (`release_no`),
+    UNIQUE KEY `uk_semantic_release_draft` (`draft_id`),
+    KEY `idx_semantic_release_status` (`release_status`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI语义建模发布与知识刷新审计';
+
+CREATE TABLE IF NOT EXISTS `s2_semantic_release_step` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '发布步骤ID',
+    `release_id` bigint NOT NULL COMMENT '发布ID',
+    `step_key` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT '发布内稳定步骤键',
+    `step_type` varchar(64) NOT NULL COMMENT '创建、刷新或回滚步骤类型',
+    `target_type` varchar(32) NOT NULL COMMENT 'MODEL、DIMENSION、METRIC、TERM或KNOWLEDGE',
+    `target_key` varchar(255) DEFAULT NULL COMMENT '草稿对象key',
+    `target_name` varchar(255) DEFAULT NULL COMMENT '管理员可见名称',
+    `target_id` bigint DEFAULT NULL COMMENT '正式对象ID',
+    `status` varchar(32) NOT NULL COMMENT 'IN_PROGRESS、SUCCEEDED、FAILED或SKIPPED',
+    `attempt_count` int NOT NULL DEFAULT 1 COMMENT '步骤尝试次数',
+    `error_message` varchar(1000) DEFAULT NULL COMMENT '脱敏失败摘要',
+    `started_at` datetime DEFAULT NULL COMMENT '最近尝试开始时间',
+    `finished_at` datetime DEFAULT NULL COMMENT '最近尝试完成时间',
+    `created_at` datetime NOT NULL COMMENT '创建时间',
+    `updated_at` datetime NOT NULL COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_semantic_release_step` (`release_id`, `step_key`),
+    KEY `idx_semantic_release_step_list` (`release_id`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI语义发布逐步骤结果';
 
 CREATE TABLE IF NOT EXISTS `s2_database` (
                                              `id` bigint(20) NOT NULL AUTO_INCREMENT,
