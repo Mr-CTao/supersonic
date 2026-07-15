@@ -2,10 +2,12 @@ package com.tencent.supersonic.headless.server.semantic.modeling;
 
 import com.tencent.supersonic.common.pojo.exception.AccessException;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
+import com.tencent.supersonic.headless.server.rest.SemanticAssetRoutingController;
 import com.tencent.supersonic.headless.server.rest.SemanticGapController;
 import com.tencent.supersonic.headless.server.rest.SemanticGapModelingDraftController;
 import com.tencent.supersonic.headless.server.rest.SemanticModelingDraftController;
 import com.tencent.supersonic.headless.server.rest.SemanticModelingValidationReportController;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingException;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -35,7 +37,7 @@ import java.util.List;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {SemanticModelingDraftController.class,
                 SemanticModelingValidationReportController.class, SemanticGapController.class,
-                SemanticGapModelingDraftController.class})
+                SemanticGapModelingDraftController.class, SemanticAssetRoutingController.class})
 @Slf4j
 public class ModelingDraftExceptionHandler {
 
@@ -51,6 +53,21 @@ public class ModelingDraftExceptionHandler {
                 ModelingDraftErrorResp.builder().code(exception.getErrorCode())
                         .message(exception.getMessage()).issues(exception.getIssues()).build();
         return ResponseEntity.status(exception.getStatus()).body(body);
+    }
+
+    /**
+     * 将资产路由的幂等、版本、权限和输出约束异常转换为稳定状态码。
+     *
+     * @param exception 只携带脱敏原因的路由业务异常。
+     * @return 保留 HTTP 4xx/5xx 语义的脱敏错误响应。
+     */
+    @ExceptionHandler(SemanticAssetRoutingException.class)
+    public ResponseEntity<ModelingDraftErrorResp> handleRouting(
+            SemanticAssetRoutingException exception) {
+        ModelingDraftErrorResp body =
+                ModelingDraftErrorResp.builder().code(exception.getErrorCode())
+                        .message(exception.getReason()).issues(List.of()).build();
+        return ResponseEntity.status(exception.getStatusCode()).body(body);
     }
 
     /**

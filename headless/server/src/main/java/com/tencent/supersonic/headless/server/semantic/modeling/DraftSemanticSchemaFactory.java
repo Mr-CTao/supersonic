@@ -23,6 +23,7 @@ import com.tencent.supersonic.headless.api.pojo.response.MetricSchemaResp;
 import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
 import com.tencent.supersonic.headless.core.pojo.Ontology;
+import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.DerivedFieldDraft;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.DimensionDraft;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.MetricDraft;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.ModelDraft;
@@ -103,8 +104,10 @@ public class DraftSemanticSchemaFactory {
                     dimensionElement(model, dimension, dataSetId, modelId, elementId);
             dataSetSchema.getDimensions().add(element);
             targetByKey.put(normalize(dimension.getKey()), element);
-            dimensions.add(dimensionSchema(model, dimension, modelId, elementId));
-            modelResp.getModelDetail().getDimensions().add(modelDimension(model, dimension));
+            dimensions.add(dimensionSchema(model, dimension, modelId, elementId,
+                    safeDatabase.getType()));
+            modelResp.getModelDetail().getDimensions()
+                    .add(modelDimension(model, dimension, safeDatabase.getType()));
         }
         Set<String> registeredMeasures = new LinkedHashSet<>();
         for (MetricDraft metric : safe(model.getMetrics())) {
@@ -151,7 +154,7 @@ public class DraftSemanticSchemaFactory {
                 .id(dataSetId).name(model.getKey())
                 .bizName(display(model.getBizName(), model.getName(), model.getKey()))
                 .description(model.getDescription()).type(SchemaElementType.DATASET)
-                .alias(List.of()).build();
+                .alias(copy(model.getValidationAliases())).build();
     }
 
     /** 构造 parser 使用的维度元素。 */
@@ -183,7 +186,7 @@ public class DraftSemanticSchemaFactory {
 
     /** 构造 translator 使用的维度定义。 */
     private DimSchemaResp dimensionSchema(ModelDraft model, DimensionDraft dimension, long modelId,
-            long elementId) {
+            long elementId, String databaseType) {
         DimSchemaResp response = new DimSchemaResp();
         response.setId(elementId);
         response.setName(semanticName(dimension.getName(), dimension.getKey()));
@@ -194,10 +197,10 @@ public class DraftSemanticSchemaFactory {
         response.setModelName(model.getKey());
         response.setModelBizName(model.getKey());
         response.setType(dimensionType(model, dimension));
-        response.setExpr(dimension.getField());
+        response.setExpr(dimensionExpression(dimension, databaseType));
         response.setAlias(String.join(",", copy(dimension.getAliases())));
         response.setSemanticType(semanticType(dimension.getSemanticType()));
-        response.getFields().add(dimension.getField());
+        response.getFields().addAll(dimensionPhysicalFields(dimension));
         return response;
     }
 
@@ -245,13 +248,61 @@ public class DraftSemanticSchemaFactory {
     }
 
     /** 构造物理模型维度。 */
-    private Dimension modelDimension(ModelDraft model, DimensionDraft dimension) {
+    private Dimension modelDimension(ModelDraft model, DimensionDraft dimension,
+            String databaseType) {
         Dimension response = new Dimension();
         response.setName(dimension.getField());
         response.setBizName(dimension.getField());
-        response.setExpr(dimension.getField());
+        response.setExpr(dimensionExpression(dimension, databaseType));
         response.setType(dimensionType(model, dimension));
         return response;
+    }
+
+    /**
+     * 把结构化 DATE_DIFF 翻译成受限方言表达式。
+     *
+     * <p>字段、操作符、单位和结束类型都已由 {@link ModelingDraftValidator} 依据服务端元数据白名单
+     * 校验；本方法只在固定模板中选择方言，不接收任意 SQL。普通维度仍直接引用已校验物理列。</p>
+     */
+    private String dimensionExpression(DimensionDraft dimension, String databaseType) {
+        DerivedFieldDraft derivation = dimension.getDerivation();
+        if (derivation == null) {
+            return dimension.getField();
+        }
+        String unit = derivation.getUnit().toUpperCase(Locale.ROOT);
+        String start = derivation.getStartField();
+        String end = "CURRENT_DATE".equals(derivation.getEndType()) ? "CURRENT_TIMESTAMP"
+                : derivation.getEndField();
+        String dialect = StringUtils.upperCase(StringUtils.trimToEmpty(databaseType),
+                Locale.ROOT);
+        return switch (dialect) {
+            case "POSTGRESQL" -> postgresDateDiff(unit, start, end);
+            case "CLICKHOUSE" -> "dateDiff('" + unit.toLowerCase(Locale.ROOT) + "', " + start
+                    + ", " + end + ")";
+            case "PRESTO", "TRINO", "DUCKDB" -> "date_diff('"
+                    + unit.toLowerCase(Locale.ROOT) + "', " + start + ", " + end + ")";
+            default -> "TIMESTAMPDIFF(" + unit + ", " + start + ", " + end + ")";
+        };
+    }
+
+    /** PostgreSQL 通过固定秒数换算 DAY/HOUR，避免注入任意 interval 或单位表达式。 */
+    private String postgresDateDiff(String unit, String start, String end) {
+        int secondsPerUnit = "HOUR".equals(unit) ? 3_600 : 86_400;
+        return "FLOOR(EXTRACT(EPOCH FROM (" + end + " - " + start + ")) / "
+                + secondsPerUnit + ")";
+    }
+
+    /** 返回派生表达式真实依赖的物理列，禁止把派生输出名伪装成表字段。 */
+    private List<String> dimensionPhysicalFields(DimensionDraft dimension) {
+        DerivedFieldDraft derivation = dimension.getDerivation();
+        if (derivation == null) {
+            return List.of(dimension.getField());
+        }
+        List<String> fields = new ArrayList<>(List.of(derivation.getStartField()));
+        if ("FIELD".equals(derivation.getEndType())) {
+            fields.add(derivation.getEndField());
+        }
+        return fields;
     }
 
     /** 构造物理模型度量字段，聚合由 MetricSchemaResp 表达式负责。 */

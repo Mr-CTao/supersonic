@@ -1,3 +1,8 @@
+/**
+ * 语义模型数据源页面样式。
+ *
+ * 职责：定义 SQL 编辑、校验诊断侧栏、执行结果和数据源管理区域的布局与交互状态。
+ */
 @borderColor: #eee;
 @activeColor: #a0c5e8;
 @hoverColor: #dee4e9;
@@ -147,15 +152,26 @@
 }
 
 .sqlOprBar {
-  margin-top: -10px;
-  padding: 5px;
   display: flex;
+  align-items: center;
+  min-height: 48px;
+  margin-top: -10px;
+  padding: 6px 8px;
+  background: #fff;
+  border-bottom: 1px solid @borderColor;
+
   .sqlOprBarLeftBox {
+    display: flex;
+    flex-wrap: nowrap;
     flex: 1 1 200px;
+    gap: 4px;
+    align-items: center;
   }
+
   .sqlOprBarRightBox {
     flex: 0 1 210px;
   }
+
   :global {
     .ant-btn-round.ant-btn-sm {
       font-size: 12px;
@@ -173,24 +189,49 @@
   }
 }
 
+.databaseSelector {
+  min-width: 180px;
+  margin-right: 8px;
+  overflow: hidden;
+
+  span:last-child {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
 .sqlOprIcon {
-  margin-right: 30px;
   color: #02a7f0;
-  font-size: 22px;
+  font-size: 18px;
+}
+
+.sqlIconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: #02a7f0;
+  font-size: 18px;
+  border-radius: 6px;
 
   &:hover {
-    cursor: pointer;
-    opacity: 0.8;
+    color: #028bc8 !important;
+    background: #eaf7fd !important;
   }
 
-  &:active {
-    opacity: 0.7;
+  &:focus-visible {
+    outline: 2px solid #91caff;
+    outline-offset: 2px;
   }
 }
 
 .sqlOprBtn {
-  margin-right: 30px;
-  vertical-align: super !important;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
 
   &:hover {
     cursor: pointer;
@@ -218,26 +259,285 @@
 }
 
 .sqlMain {
+  position: relative;
   display: flex;
   flex-direction: row;
   height: 100%;
+  min-width: 0;
+  overflow: hidden;
 
   .sqlEditorWrapper {
     flex: 1;
+    min-width: 320px;
     height: 100%;
     overflow: hidden;
   }
 
   .sqlParams {
-    width: 20%;
+    flex: 0 0 clamp(280px, 20vw, 360px);
     height: 100% !important;
     overflow: auto;
+    background: #fff;
+    border-left: 1px solid @borderColor;
   }
+
   .hideSqlParams {
     width: 0;
     height: 100% !important;
     overflow: auto;
   }
+}
+
+.diagnosticPanel {
+  display: flex;
+  flex: 0 0 clamp(380px, 31vw, 520px);
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #f7f9fc;
+  border-left: 1px solid #dfe5ec;
+}
+
+.diagnosticPanelHeader {
+  display: flex;
+  flex: 0 0 48px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 16px;
+  background: #fff;
+  border-bottom: 1px solid #e8edf3;
+}
+
+.diagnosticPanelIcon {
+  color: #1677ff;
+  font-size: 18px;
+}
+
+.diagnosticPanelTitle {
+  color: rgba(0, 0, 0, 0.88);
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.diagnosticPanelBody {
+  flex: 1;
+  padding: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.diagnosticPanelToggle {
+  position: absolute;
+  top: 12px;
+  // 收起后按钮内移，避免与 Ace 编辑器的垂直滚动条点击层重叠。
+  right: 12px;
+  z-index: 20;
+  width: 34px;
+  height: 40px;
+  color: #1677ff;
+  background: #fff;
+  border-color: #d9e5f5;
+  border-radius: 8px;
+  box-shadow: 0 3px 10px rgba(31, 56, 88, 0.12);
+}
+
+.diagnosticPanelToggleBlocking {
+  color: #cf1322;
+  background: #fff2f0;
+  border-color: #ffccc7;
+}
+
+.diagnosticSection {
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e6ebf1;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(31, 56, 88, 0.04);
+
+  & + & {
+    margin-top: 12px;
+  }
+}
+
+.diagnosticSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.diagnosticSectionTitle {
+  color: rgba(0, 0, 0, 0.88);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.diagnosticSectionSubtitle {
+  margin-top: 2px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.diagnosticLoading,
+.diagnosticEmpty {
+  padding: 22px 14px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  text-align: center;
+}
+
+.validationList {
+  padding: 4px 14px 10px;
+}
+
+.validationItem {
+  padding: 10px 0;
+  border-bottom: 1px solid #f0f2f5;
+
+  &:last-child {
+    border-bottom: 0;
+  }
+}
+
+.validationItemBlocking {
+  margin: 6px -8px;
+  padding: 10px 8px;
+  background: #fff7f6;
+  border: 1px solid #ffccc7;
+  border-radius: 6px;
+
+  &:last-child {
+    border-bottom: 1px solid #ffccc7;
+  }
+}
+
+.validationItemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.validationItemTitle {
+  color: rgba(0, 0, 0, 0.88);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.validationMessage {
+  margin-top: 5px;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.validationDeferredNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 2px;
+  padding: 8px 10px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 18px;
+  background: #fafafa;
+  border-radius: 6px;
+
+  // 该提示仅解释后续阶段边界，不参与当前校验状态或用户操作。
+  :global(.anticon) {
+    flex: 0 0 auto;
+    margin-top: 2px;
+    color: rgba(0, 0, 0, 0.35);
+  }
+}
+
+.validationLocation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 5px 8px;
+  color: #7a3e00;
+  font-family: 'Menlo', 'Monaco', 'Ubuntu Mono', 'Consolas', monospace;
+  font-size: 12px;
+  background: #fffbe6;
+  border-radius: 4px;
+}
+
+.validationSuggestion {
+  margin-top: 6px;
+  padding-left: 10px;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  line-height: 20px;
+  border-left: 2px solid #faad14;
+}
+
+.healthGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+
+.healthItem {
+  min-width: 0;
+  padding: 9px 10px;
+  background: #f7f9fc;
+  border: 1px solid #edf0f4;
+  border-radius: 6px;
+}
+
+.healthItemLabel {
+  margin-bottom: 5px;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.healthItemStatus {
+  color: rgba(0, 0, 0, 0.75);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.healthNotice {
+  margin: 0 14px 12px;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+  color: #7a3e00;
+  font-size: 12px;
+  line-height: 18px;
+  background: #fffbe6;
+  border-radius: 4px;
+}
+
+.statusSuccess {
+  color: #52c41a;
+}
+
+.statusError {
+  color: #ff4d4f;
+}
+
+.statusWarning {
+  color: #faad14;
+}
+
+.statusProcessing {
+  color: #1677ff;
+}
+
+.statusDefault {
+  color: #bfbfbf;
 }
 
 .sqlParamsBody {
@@ -375,6 +675,7 @@
   height: 41px;
   padding: 5px 0;
   text-align: right;
+  background: #fff;
 }
 
 .sqlResultPane {
@@ -389,7 +690,7 @@
   margin-right: 15px;
   background-color: #e87954;
   border-color: #e87954;
-  &:hover{
+  &:hover {
     border-color: #f89878;
     background: #f89878;
   }
@@ -468,7 +769,6 @@
   }
 }
 
-
 .taskIcon {
   margin-right: 10px;
   color: #1890ff;
@@ -514,6 +814,10 @@
   width: 100%;
 
   :global {
+    .ant-table-container {
+      min-width: 100%;
+    }
+
     .ant-table-body {
       width: 100%;
       // max-height: none !important;
@@ -524,7 +828,18 @@
     .resultTableRow > td {
       padding: 8px;
       font-size: 12px;
+      white-space: nowrap;
     }
+  }
+}
+
+@media (max-width: 1200px) {
+  .diagnosticPanel {
+    flex-basis: 380px;
+  }
+
+  .healthGrid {
+    grid-template-columns: 1fr;
   }
 }
 

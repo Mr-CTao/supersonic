@@ -34,6 +34,15 @@ public enum SemanticGapFailureType {
     /** 问答链路回退到 LLM 直接生成 SQL。 */
     FALLBACK_TO_LLM_SQL,
 
+    /** 业务口径无法由系统确定，需要业务人员确认。 */
+    BUSINESS_DEFINITION_UNCERTAIN,
+
+    /** 确认缺少模型、指标、维度或关系等语义资产。 */
+    SEMANTIC_ASSET_MISSING,
+
+    /** 模型 SQL、表达式、Calcite 翻译或执行等确定性技术校验失败。 */
+    TECHNICAL_VALIDATION_FAILED,
+
     /** 暂时无法归类的失败信号。 */
     UNKNOWN
 }

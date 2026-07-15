@@ -29,6 +29,11 @@ public class ModelingDraftResp {
     private List<String> selectedTables;
     private Integer chatModelId;
     private Boolean includeSampleData;
+    private Long routeAnalysisId;
+    private String routeAction;
+    private String routeTargetAssetType;
+    /** 已确认目标的基线版本；正式资产 ID 仅留在服务端持久化快照中，禁止通过草稿 API 返回。 */
+    private Long routeTargetAssetVersion;
     private String status;
     private Integer currentVersionNo;
     /** 兼容管理端早期字段命名，值与 currentVersionNo 相同。 */

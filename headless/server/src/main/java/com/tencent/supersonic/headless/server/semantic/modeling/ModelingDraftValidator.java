@@ -7,10 +7,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tencent.supersonic.headless.api.pojo.DBColumn;
+import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.DerivedFieldDraft;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.DimensionDraft;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.MetricDraft;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.MetricFilterDraft;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.ModelDraft;
+import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.ModificationDraft;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.SensitiveFieldDraft;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.TermDraft;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftPayload.TermTargetDraft;
@@ -30,8 +32,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 /**
  * AI 语义建模草稿结构与语义校验器。
@@ -46,15 +50,25 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ModelingDraftValidator {
 
     private static final String SCHEMA_RESOURCE = "schema/semantic-modeling-draft-v1.json";
+    private static final String ROUTED_SCHEMA_RESOURCE =
+            "schema/semantic-modeling-draft-v2.json";
     private static final String OBJECT_TYPE_DIMENSION = "DIMENSION";
     private static final String OBJECT_TYPE_METRIC = "METRIC";
     private static final String ISSUE_TERM_TARGET_TYPE_MISMATCH = "TERM_TARGET_TYPE_MISMATCH";
+    private static final Pattern DERIVED_FIELD_NAME_PATTERN =
+            Pattern.compile("^[A-Za-z][A-Za-z0-9_]{0,127}$");
+    private static final Pattern DERIVATION_PHYSICAL_FIELD_PATTERN =
+            Pattern.compile("^[A-Za-z_][A-Za-z0-9_]{0,127}$");
+    private static final Set<String> ALLOWED_MODIFICATION_FIELDS =
+            Set.of("description", "aliases");
     private static final Set<String> GENERIC_TERMS =
             Set.of("数据", "信息", "业务", "指标", "维度", "data", "info", "business", "metric", "dimension");
 
     private final ObjectMapper objectMapper;
     private final JSONSchema jsonSchema;
     private final JsonNode schemaNode;
+    private final JSONSchema routedJsonSchema;
+    private final JsonNode routedSchemaNode;
 
     /**
      * 加载并编译固定 JSON Schema。
@@ -64,16 +78,26 @@ public class ModelingDraftValidator {
      */
     public ModelingDraftValidator(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
-        try (InputStream input = getClass().getClassLoader().getResourceAsStream(SCHEMA_RESOURCE)) {
+        SchemaBundle legacy = loadSchemaBundle(SCHEMA_RESOURCE);
+        SchemaBundle routed = loadSchemaBundle(ROUTED_SCHEMA_RESOURCE);
+        this.schemaNode = legacy.node();
+        this.jsonSchema = legacy.schema();
+        this.routedSchemaNode = routed.node();
+        this.routedJsonSchema = routed.schema();
+    }
+
+    /** 加载单个只读 Schema 资源；构造阶段失败会阻止错误契约进入运行态。 */
+    private SchemaBundle loadSchemaBundle(String resource) {
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
             if (input == null) {
-                throw new IllegalStateException("Missing semantic modeling draft schema");
+                throw new IllegalStateException("Missing semantic modeling draft schema: " + resource);
             }
             String schemaText = new String(input.readAllBytes(), StandardCharsets.UTF_8);
-            this.schemaNode = objectMapper.readTree(schemaText);
-            this.jsonSchema = JSONSchema.parseSchema(schemaText);
+            return new SchemaBundle(objectMapper.readTree(schemaText),
+                    JSONSchema.parseSchema(schemaText));
         } catch (IOException | RuntimeException exception) {
-            throw new IllegalStateException("Unable to load semantic modeling draft schema",
-                    exception);
+            throw new IllegalStateException("Unable to load semantic modeling draft schema: "
+                    + resource, exception);
         }
     }
 
@@ -99,22 +123,31 @@ public class ModelingDraftValidator {
 
         validateJsonSchema(json);
         ModelingDraftPayload payload = deserialize(json);
+        deduplicateUncertainties(payload);
+        ModelingDraftPayload validationPayload = payload.validationView();
         List<ModelingValidationIssue> errors = new ArrayList<>();
         Map<String, TableMetadata> metadata = buildMetadata(columnsByTable);
         Set<String> keys = new HashSet<>();
         Map<String, String> objectTypes = new HashMap<>();
         Map<String, CrossTableObjectReference> crossTableObjects = new HashMap<>();
         Set<String> seenNames = normalizeNames(existingNames);
-        deduplicateUncertainties(payload);
         AtomicInteger uncertaintySequence =
                 new AtomicInteger(maxUncertaintySequence(payload.getUncertainties()));
 
-        for (int modelIndex = 0; modelIndex < payload.getModels().size(); modelIndex++) {
-            ModelDraft model = payload.getModels().get(modelIndex);
-            String modelPath = "$.models[" + modelIndex + "]";
+        boolean extendingExisting = ModelingDraftConstants.ACTION_EXTEND_EXISTING
+                .equals(payload.getAction());
+        for (int modelIndex = 0; modelIndex < validationPayload.getModels().size(); modelIndex++) {
+            ModelDraft model = validationPayload.getModels().get(modelIndex);
+            String modelPath = extendingExisting
+                    ? "$.additions"
+                    : "$.models[" + modelIndex + "]";
             registerKey(model.getKey(), modelPath + ".key", keys, errors);
-            registerNames(payload, uncertaintySequence, model.getKey(), model.getKey(), null,
-                    model.getName(), model.getBizName(), null, seenNames);
+            if (!extendingExisting) {
+                // 增量校验视图中的模型名来自已确认目标资产，只是只读定位信息；把它再次与
+                // 现有资产名称集合比较会制造虚假的 ALIAS_CONFLICT，并导致每次保存重复告警。
+                registerNames(payload, uncertaintySequence, model.getKey(), model.getKey(), null,
+                        model.getName(), model.getBizName(), null, seenNames);
+            }
 
             TableMetadata table = metadata.get(normalize(model.getBaseTable()));
             if (table == null) {
@@ -134,8 +167,10 @@ public class ModelingDraftValidator {
                     errors);
         }
 
-        validateTerms(payload, keys, objectTypes, crossTableObjects, seenNames, uncertaintySequence,
-                errors);
+        validateRoutedSections(payload, seenNames, uncertaintySequence, errors);
+
+        validateTerms(validationPayload, keys, objectTypes, crossTableObjects, seenNames,
+                uncertaintySequence, errors);
         validateUncertaintyKeys(payload, keys, errors);
         if (!errors.isEmpty()) {
             throw invalid(errors);
@@ -165,6 +200,18 @@ public class ModelingDraftValidator {
     }
 
     /**
+     * 按草稿版本返回 LLM Gateway 使用的只读 JSON Schema 副本。
+     *
+     * @param schemaVersion 草稿 Schema 版本；2.0 返回路由感知契约，其余按历史 1.0 兼容。
+     * @return 不会暴露单例可变状态的 Schema 深拷贝。
+     */
+    public JsonNode getJsonSchema(String schemaVersion) {
+        return ModelingDraftConstants.SCHEMA_VERSION_ROUTED.equals(schemaVersion)
+                ? routedSchemaNode.deepCopy()
+                : schemaNode.deepCopy();
+    }
+
+    /**
      * 先聚合结构问题，再使用 fastjson2 完成固定 JSON Schema 的最终判定。
      *
      * <p>
@@ -175,13 +222,18 @@ public class ModelingDraftValidator {
     private void validateJsonSchema(String json) {
         try {
             JsonNode candidate = objectMapper.readTree(json);
+            boolean routed = ModelingDraftConstants.SCHEMA_VERSION_ROUTED
+                    .equals(candidate.path("schemaVersion").asText());
+            JsonNode selectedSchemaNode = routed ? routedSchemaNode : schemaNode;
+            JSONSchema selectedJsonSchema = routed ? routedJsonSchema : jsonSchema;
             List<ModelingValidationIssue> structuralIssues = new ArrayList<>();
-            collectStructuralIssues(candidate, schemaNode, "$", structuralIssues);
+            collectStructuralIssues(candidate, selectedSchemaNode, selectedSchemaNode, "$",
+                    structuralIssues);
             if (!structuralIssues.isEmpty()) {
                 throw invalid(structuralIssues);
             }
             Object value = JSON.parse(json);
-            ValidateResult result = jsonSchema.validate(value);
+            ValidateResult result = selectedJsonSchema.validate(value);
             if (!result.isSuccess()) {
                 // fastjson2 的原始消息可能拼入字段值；前端和 attempt 历史只保存固定脱敏文案。
                 throw invalid(
@@ -195,12 +247,12 @@ public class ModelingDraftValidator {
     }
 
     /** 递归收集结构问题；达到上限后立即停止继续遍历。 */
-    private void collectStructuralIssues(JsonNode value, JsonNode rawSchema, String path,
-            List<ModelingValidationIssue> issues) {
+    private void collectStructuralIssues(JsonNode value, JsonNode rawSchema, JsonNode schemaRoot,
+            String path, List<ModelingValidationIssue> issues) {
         if (issues.size() >= ModelingDraftConstants.MAX_VALIDATION_ISSUES) {
             return;
         }
-        JsonNode schema = resolveSchema(rawSchema);
+        JsonNode schema = resolveSchema(rawSchema, schemaRoot);
         if (!matchesDeclaredType(value, schema.get("type"))) {
             issues.add(issue(path, "JSON_TYPE_MISMATCH", "字段类型不符合 JSON Schema"));
             return;
@@ -209,19 +261,19 @@ public class ModelingDraftValidator {
             return;
         }
         if (value.isObject()) {
-            collectObjectIssues(value, schema, path, issues);
+            collectObjectIssues(value, schema, schemaRoot, path, issues);
         } else if (value.isArray() && schema.has("items")) {
             for (int index = 0; index < value.size()
                     && issues.size() < ModelingDraftConstants.MAX_VALIDATION_ISSUES; index++) {
-                collectStructuralIssues(value.get(index), schema.get("items"),
+                collectStructuralIssues(value.get(index), schema.get("items"), schemaRoot,
                         path + "[" + index + "]", issues);
             }
         }
     }
 
     /** 收集对象缺失字段、未知字段以及已声明子字段的递归问题。 */
-    private void collectObjectIssues(JsonNode value, JsonNode schema, String path,
-            List<ModelingValidationIssue> issues) {
+    private void collectObjectIssues(JsonNode value, JsonNode schema, JsonNode schemaRoot,
+            String path, List<ModelingValidationIssue> issues) {
         JsonNode required = schema.get("required");
         if (required != null && required.isArray()) {
             for (JsonNode requiredName : required) {
@@ -251,17 +303,17 @@ public class ModelingDraftValidator {
                 }
                 continue;
             }
-            collectStructuralIssues(field.getValue(), fieldSchema, childPath(path, field.getKey()),
-                    issues);
+            collectStructuralIssues(field.getValue(), fieldSchema, schemaRoot,
+                    childPath(path, field.getKey()), issues);
         }
     }
 
     /** 解析当前固定 Schema 内的本地 {@code #/...} 引用。 */
-    private JsonNode resolveSchema(JsonNode schema) {
+    private JsonNode resolveSchema(JsonNode schema, JsonNode schemaRoot) {
         if (schema != null && schema.has("$ref")) {
             String reference = schema.get("$ref").asText();
             if (reference.startsWith("#/")) {
-                JsonNode resolved = schemaNode.at(reference.substring(1));
+                JsonNode resolved = schemaRoot.at(reference.substring(1));
                 if (!resolved.isMissingNode()) {
                     return resolved;
                 }
@@ -324,11 +376,12 @@ public class ModelingDraftValidator {
             return metadata;
         }
         columnsByTable.forEach((table, columns) -> {
-            Map<String, String> fields = new HashMap<>();
+            Map<String, ColumnMetadata> fields = new HashMap<>();
             if (columns != null) {
                 for (DBColumn column : columns) {
                     if (column != null && StringUtils.isNotBlank(column.getColumnName())) {
-                        fields.put(normalize(column.getColumnName()), column.getColumnName());
+                        fields.put(normalize(column.getColumnName()),
+                                new ColumnMetadata(column.getColumnName(), column.getDataType()));
                     }
                 }
             }
@@ -368,21 +421,25 @@ public class ModelingDraftValidator {
         while (iterator.hasNext()) {
             DimensionDraft dimension = iterator.next();
             String path = modelPath + ".dimensions[" + index + "]";
-            FieldResolution resolution = resolveField(dimension.getField(), table, allTables);
-            if (resolution.type() == FieldResolutionType.CROSS_TABLE) {
-                addCrossTableUncertainty(payload, uncertaintySequence, model.getKey(),
-                        dimension.getKey(), dimension.getField());
-                // 对象虽从模型中移除，仍需保留其 key 上下文，供后续术语校验识别“已降级”而非“真正未知”。
-                rememberCrossTableObject(crossTableObjects, model.getKey(), dimension.getKey(),
-                        dimension.getField());
-                iterator.remove();
-                index++;
-                continue;
-            }
-            if (resolution.type() != FieldResolutionType.LOCAL) {
-                errors.add(issue(path + ".field", "UNKNOWN_FIELD", "维度字段不存在于 baseTable"));
+            if (dimension.getDerivation() != null) {
+                validateDerivedDimension(dimension, table, allTables, path, errors);
             } else {
-                dimension.setField(resolution.field());
+                FieldResolution resolution = resolveField(dimension.getField(), table, allTables);
+                if (resolution.type() == FieldResolutionType.CROSS_TABLE) {
+                    addCrossTableUncertainty(payload, uncertaintySequence, model.getKey(),
+                            dimension.getKey(), dimension.getField());
+                    // 对象虽从模型中移除，仍需保留其 key 上下文，供后续术语校验识别“已降级”而非“真正未知”。
+                    rememberCrossTableObject(crossTableObjects, model.getKey(), dimension.getKey(),
+                            dimension.getField());
+                    iterator.remove();
+                    index++;
+                    continue;
+                }
+                if (resolution.type() != FieldResolutionType.LOCAL) {
+                    errors.add(issue(path + ".field", "UNKNOWN_FIELD", "维度字段不存在于 baseTable"));
+                } else {
+                    dimension.setField(resolution.field());
+                }
             }
             registerKey(dimension.getKey(), path + ".key", keys, errors);
             // 术语引用不仅要命中对象 key，还必须与目标对象的实际类型一致。
@@ -396,6 +453,82 @@ public class ModelingDraftValidator {
             }
             index++;
         }
+    }
+
+    /**
+     * 校验受限日期差派生字段，拒绝任意表达式和跨表字段。
+     *
+     * <p>为什么使用结构化操作符：不同数据库的日期函数语法不同，草稿只保存业务含义，阶段 5
+     * 再由正式资产 API 选择方言；这里不拼接、更不执行任何 SQL。</p>
+     */
+    private void validateDerivedDimension(DimensionDraft dimension, TableMetadata table,
+            Map<String, TableMetadata> allTables, String path,
+            List<ModelingValidationIssue> errors) {
+        DerivedFieldDraft derivation = dimension.getDerivation();
+        if (!DERIVED_FIELD_NAME_PATTERN.matcher(StringUtils.defaultString(dimension.getField()))
+                .matches()) {
+            errors.add(issue(path + ".field", "ILLEGAL_DERIVED_FIELD_NAME",
+                    "派生字段名必须是安全的英文标识符"));
+        }
+
+        FieldResolution start = resolveField(derivation.getStartField(), table, allTables);
+        if (start.type() != FieldResolutionType.LOCAL) {
+            errors.add(issue(path + ".derivation.startField", "UNKNOWN_DERIVATION_FIELD",
+                    "派生字段的起始日期必须来自目标模型 baseTable"));
+        } else {
+            derivation.setStartField(start.field());
+            validateTemporalDerivationField(start, path + ".derivation.startField", errors);
+        }
+
+        if ("CURRENT_DATE".equals(derivation.getEndType())) {
+            if (StringUtils.isNotBlank(derivation.getEndField())) {
+                errors.add(issue(path + ".derivation.endField", "ILLEGAL_DERIVATION_END",
+                        "结束类型为 CURRENT_DATE 时不得同时提供结束字段"));
+            }
+            derivation.setEndField(null);
+            return;
+        }
+        if (!"FIELD".equals(derivation.getEndType())) {
+            errors.add(issue(path + ".derivation.endType", "ILLEGAL_DERIVATION_END",
+                    "日期差结束值只能是当前日期或同表字段"));
+            return;
+        }
+        FieldResolution end = resolveField(derivation.getEndField(), table, allTables);
+        if (end.type() != FieldResolutionType.LOCAL) {
+            errors.add(issue(path + ".derivation.endField", "UNKNOWN_DERIVATION_FIELD",
+                    "派生字段的结束日期必须来自目标模型 baseTable"));
+        } else {
+            derivation.setEndField(end.field());
+            validateTemporalDerivationField(end, path + ".derivation.endField", errors);
+        }
+    }
+
+    /**
+     * 校验日期差只能引用安全且真实的日期/时间戳物理列。
+     *
+     * <p>为什么同时校验标识符与类型：隔离 Schema 工厂会把已确认字段组合成受限方言表达式；
+     * 若允许任意物理列名或数值/文本列进入表达式，既会产生不可移植 SQL，也会把错误口径延迟到
+     * 阶段 5 才暴露。</p>
+     */
+    private void validateTemporalDerivationField(FieldResolution resolution, String path,
+            List<ModelingValidationIssue> errors) {
+        if (!DERIVATION_PHYSICAL_FIELD_PATTERN.matcher(resolution.field()).matches()) {
+            errors.add(issue(path, "UNSAFE_DERIVATION_FIELD",
+                    "日期差物理字段必须是安全的单列标识符"));
+            return;
+        }
+        if (!isDateOrTimestampType(resolution.dataType())) {
+            errors.add(issue(path, "DERIVATION_FIELD_NOT_TEMPORAL",
+                    "日期差起止字段必须是 DATE、DATETIME 或 TIMESTAMP 类型"));
+        }
+    }
+
+    /** 判断常见数据库日期与时间戳类型；不把纯 TIME、字符或数值列误当日期基准。 */
+    private boolean isDateOrTimestampType(String dataType) {
+        String normalizedType = StringUtils.upperCase(StringUtils.trimToEmpty(dataType),
+                Locale.ROOT).replaceAll("\\s+", " ");
+        return normalizedType.startsWith("DATE") || normalizedType.startsWith("DATETIME")
+                || normalizedType.startsWith("TIMESTAMP");
     }
 
     /** 校验指标聚合、表达式和结构化过滤。 */
@@ -544,6 +677,165 @@ public class ModelingDraftValidator {
         return aggregation + "(" + field + ")";
     }
 
+    /**
+     * 校验 2.0 路由专属区段，确保增量别名、修改建议和回归问法不会绕过门禁。
+     *
+     * <p>CREATE_NEW 不得携带任何目标资产修改；EXTEND_EXISTING 仅允许对已确认目标模型自身的
+     * description/aliases 做可审计的非删除修改。目标子对象清单当前没有进入确认快照，因此维度、
+     * 指标和术语修改一律 fail-closed，避免仅凭 LLM objectKey 产生跨资产修改。</p>
+     */
+    private void validateRoutedSections(ModelingDraftPayload payload, Set<String> seenNames,
+            AtomicInteger uncertaintySequence, List<ModelingValidationIssue> errors) {
+        if (!ModelingDraftConstants.SCHEMA_VERSION_ROUTED.equals(payload.getSchemaVersion())) {
+            return;
+        }
+        boolean extending = ModelingDraftConstants.ACTION_EXTEND_EXISTING
+                .equals(payload.getAction());
+        if (!extending) {
+            if (payload.getModifications() != null && !payload.getModifications().isEmpty()) {
+                errors.add(issue("$.modifications", "UNEXPECTED_MODIFICATIONS",
+                        "CREATE_NEW 草稿不得修改任何正式资产"));
+            }
+            if (payload.getRegressionQuestions() != null
+                    && !payload.getRegressionQuestions().isEmpty()) {
+                errors.add(issue("$.regressionQuestions", "UNEXPECTED_REGRESSION_QUESTIONS",
+                        "CREATE_NEW 草稿不得携带目标资产回归问法"));
+            }
+            return;
+        }
+
+        String targetHandle = payload.getTargetAsset() == null ? null
+                : payload.getTargetAsset().getCandidateHandle();
+        registerIncrementalAliases(payload, targetHandle, seenNames, uncertaintySequence);
+        validateModifications(payload, targetHandle, seenNames, uncertaintySequence);
+        if (payload.getRegressionQuestions() == null
+                || payload.getRegressionQuestions().stream().allMatch(StringUtils::isBlank)) {
+            addUncertainty(payload, uncertaintySequence, targetHandle, targetHandle,
+                    "regressionQuestions", "REGRESSION_VALIDATION_REQUIRED", "BLOCKING",
+                    "增强草稿至少需要一条回归问法进入真实语义解析与只读 SQL 验证");
+        }
+    }
+
+    /** 将模型级新增别名纳入现有资产重名检查；目标资产只读名称本身不参与新增对象比较。 */
+    private void registerIncrementalAliases(ModelingDraftPayload payload, String targetHandle,
+            Set<String> seenNames, AtomicInteger uncertaintySequence) {
+        if (payload.getAdditions() == null || payload.getAdditions().getAliases() == null) {
+            return;
+        }
+        Set<String> localNames = new HashSet<>();
+        for (String alias : payload.getAdditions().getAliases()) {
+            addAliasConflict(payload, uncertaintySequence, targetHandle, targetHandle, null,
+                    alias, seenNames, localNames);
+        }
+    }
+
+    /** 对受控 before/after 修改做结构、目标范围和非删除校验。 */
+    private void validateModifications(ModelingDraftPayload payload, String targetHandle,
+            Set<String> seenNames, AtomicInteger uncertaintySequence) {
+        List<ModificationDraft> modifications = payload.getModifications() == null ? List.of()
+                : payload.getModifications();
+        for (ModificationDraft modification : modifications) {
+            if (modification == null) {
+                addModificationBlocker(payload, uncertaintySequence, targetHandle, null, null,
+                        "修改项不能为空");
+                continue;
+            }
+            String objectKey = modification.getObjectKey();
+            String field = modification.getField();
+            if (!"MODEL".equals(modification.getObjectType())
+                    || !StringUtils.equals(targetHandle, objectKey)) {
+                addModificationBlocker(payload, uncertaintySequence, targetHandle, objectKey,
+                        field, "当前确认快照只能证明目标模型自身，禁止修改子对象或其他资产");
+            }
+            if (!ALLOWED_MODIFICATION_FIELDS.contains(field)) {
+                addModificationBlocker(payload, uncertaintySequence, targetHandle, objectKey,
+                        field, "只允许受控修改 description 或 aliases，禁止修改指标语义和事实粒度");
+                continue;
+            }
+            if (modification.getBeforeValue() == null || modification.getAfterValue() == null) {
+                addModificationBlocker(payload, uncertaintySequence, targetHandle, objectKey,
+                        field, "修改项必须同时提供非空 beforeValue 和 afterValue");
+                continue;
+            }
+            if (Objects.equals(modification.getBeforeValue(), modification.getAfterValue())) {
+                addModificationBlocker(payload, uncertaintySequence, targetHandle, objectKey,
+                        field, "beforeValue 与 afterValue 相同，无法形成可审计的增量修改");
+                continue;
+            }
+            if ("description".equals(field)) {
+                validateDescriptionModification(payload, uncertaintySequence, targetHandle,
+                        modification);
+            } else {
+                validateAliasModification(payload, uncertaintySequence, targetHandle,
+                        modification, seenNames);
+            }
+        }
+    }
+
+    /** 描述修改必须是非空字符串；空 afterValue 等价于删除，第一版明确禁止。 */
+    private void validateDescriptionModification(ModelingDraftPayload payload,
+            AtomicInteger uncertaintySequence, String targetHandle,
+            ModificationDraft modification) {
+        if (!(modification.getBeforeValue() instanceof String before)
+                || !(modification.getAfterValue() instanceof String after)
+                || StringUtils.isBlank(before) || StringUtils.isBlank(after)) {
+            addModificationBlocker(payload, uncertaintySequence, targetHandle,
+                    modification.getObjectKey(), modification.getField(),
+                    "description 修改必须提供非空字符串，禁止通过清空内容删除既有说明");
+        }
+    }
+
+    /** 别名修改只允许追加安全字符串，不允许删除既有别名。 */
+    private void validateAliasModification(ModelingDraftPayload payload,
+            AtomicInteger uncertaintySequence, String targetHandle,
+            ModificationDraft modification, Set<String> seenNames) {
+        List<String> before = stringList(modification.getBeforeValue());
+        List<String> after = stringList(modification.getAfterValue());
+        if (before == null || after == null || after.isEmpty()) {
+            addModificationBlocker(payload, uncertaintySequence, targetHandle,
+                    modification.getObjectKey(), modification.getField(),
+                    "aliases 修改必须使用非空字符串数组");
+            return;
+        }
+        Set<String> normalizedBefore = before.stream().map(ModelingDraftValidator::normalize)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> normalizedAfter = after.stream().map(ModelingDraftValidator::normalize)
+                .collect(java.util.stream.Collectors.toSet());
+        if (!normalizedAfter.containsAll(normalizedBefore)) {
+            addModificationBlocker(payload, uncertaintySequence, targetHandle,
+                    modification.getObjectKey(), modification.getField(),
+                    "第一版只允许追加别名，不允许删除正式资产的既有别名");
+            return;
+        }
+        Set<String> localNames = new HashSet<>();
+        after.stream().filter(alias -> !normalizedBefore.contains(normalize(alias)))
+                .forEach(alias -> addAliasConflict(payload, uncertaintySequence, targetHandle,
+                        modification.getObjectKey(), null, alias, seenNames, localNames));
+    }
+
+    /** 把 Jackson 绑定的 Object 严格转换为非空字符串列表，类型不匹配时返回 null。 */
+    private List<String> stringList(Object value) {
+        if (!(value instanceof List<?> values)) {
+            return null;
+        }
+        List<String> result = new ArrayList<>();
+        for (Object item : values) {
+            if (!(item instanceof String text) || StringUtils.isBlank(text)) {
+                return null;
+            }
+            result.add(text);
+        }
+        return result;
+    }
+
+    /** 追加范围/结构不安全的修改阻塞项，统一使用稳定业务身份避免重复保存膨胀。 */
+    private void addModificationBlocker(ModelingDraftPayload payload,
+            AtomicInteger uncertaintySequence, String targetHandle, String objectKey, String field,
+            String reason) {
+        addUncertainty(payload, uncertaintySequence, targetHandle, objectKey, field,
+                "UNAUTHORIZED_MODIFICATION", "BLOCKING", reason);
+    }
+
     /** 校验术语 key、别名以及本地对象引用的存在性和类型一致性。 */
     private void validateTerms(ModelingDraftPayload payload, Set<String> keys,
             Map<String, String> objectTypes,
@@ -646,7 +938,7 @@ public class ModelingDraftValidator {
         }
         if (!seenNames.add(normalized)) {
             addUncertainty(payload, sequence, modelKey, objectKey, field, "ALIAS_CONFLICT",
-                    "WARNING", "名称或别名与其他草稿对象或现有资产冲突：" + candidate);
+                    "BLOCKING", "名称或别名与其他草稿对象或现有资产冲突：" + candidate);
         }
     }
 
@@ -661,8 +953,10 @@ public class ModelingDraftValidator {
     private void addUncertainty(ModelingDraftPayload payload, AtomicInteger sequence,
             String modelKey, String objectKey, String field, String category, String severity,
             String reason) {
-        UncertaintyIdentity identity =
-                new UncertaintyIdentity(modelKey, objectKey, field, category, severity, reason);
+        boolean hasTarget = StringUtils.isNotBlank(modelKey) || StringUtils.isNotBlank(objectKey)
+                || StringUtils.isNotBlank(field);
+        UncertaintyIdentity identity = new UncertaintyIdentity(modelKey, objectKey, field,
+                category, hasTarget ? null : normalize(reason));
         boolean exists = payload.getUncertainties().stream().map(this::uncertaintyIdentity)
                 .anyMatch(identity::equals);
         if (exists) {
@@ -679,13 +973,39 @@ public class ModelingDraftValidator {
         payload.getUncertainties().add(uncertainty);
     }
 
-    /** 对输入中已经重复的不确定项按稳定业务身份去重，并保留最先出现项及其审计 key。 */
+    /**
+     * 对输入中已经重复的不确定项按稳定业务身份去重。
+     *
+     * <p>文案和严重级别属于可变展示属性，不参与身份；重复项保留最早审计 key，并把严重级别
+     * 升级到最严格值，避免多轮保存因提示语变化无限追加，也避免去重过程意外降低门禁。</p>
+     */
     private void deduplicateUncertainties(ModelingDraftPayload payload) {
         Map<UncertaintyIdentity, UncertaintyDraft> unique = new LinkedHashMap<>();
         for (UncertaintyDraft uncertainty : payload.getUncertainties()) {
-            unique.putIfAbsent(uncertaintyIdentity(uncertainty), uncertainty);
+            UncertaintyIdentity identity = uncertaintyIdentity(uncertainty);
+            UncertaintyDraft existing = unique.putIfAbsent(identity, uncertainty);
+            if (existing != null
+                    && uncertaintySeverityRank(uncertainty.getSeverity())
+                            > uncertaintySeverityRank(existing.getSeverity())) {
+                existing.setSeverity(uncertainty.getSeverity());
+            }
+            if (existing != null && StringUtils.isBlank(existing.getReason())
+                    && StringUtils.isNotBlank(uncertainty.getReason())) {
+                existing.setReason(uncertainty.getReason());
+            }
         }
         payload.setUncertainties(new ArrayList<>(unique.values()));
+    }
+
+    /** 将严重级别转换成可比较等级；未知值按最严格处理以保持 fail-closed。 */
+    private int uncertaintySeverityRank(String severity) {
+        if (ModelingDraftConstants.FINDING_INFO.equalsIgnoreCase(severity)) {
+            return 1;
+        }
+        if (ModelingDraftConstants.FINDING_WARNING.equalsIgnoreCase(severity)) {
+            return 2;
+        }
+        return 3;
     }
 
     /** 读取既有 uncertainty_N key 的最大序号，避免稀疏历史 key 与新生成 key 冲突。 */
@@ -716,11 +1036,15 @@ public class ModelingDraftValidator {
         return candidate;
     }
 
-    /** 构造忽略审计 key 的不确定项业务身份。 */
+    /** 构造忽略审计 key、提示文案和严重级别的稳定业务身份。 */
     private UncertaintyIdentity uncertaintyIdentity(UncertaintyDraft uncertainty) {
+        boolean hasTarget = StringUtils.isNotBlank(uncertainty.getModelKey())
+                || StringUtils.isNotBlank(uncertainty.getObjectKey())
+                || StringUtils.isNotBlank(uncertainty.getField());
+        // 没有任何目标坐标的全局问题仍需用规范化原因区分，否则不同全局问题会被误合并。
+        String globalDiscriminator = hasTarget ? null : normalize(uncertainty.getReason());
         return new UncertaintyIdentity(uncertainty.getModelKey(), uncertainty.getObjectKey(),
-                uncertainty.getField(), uncertainty.getCategory(), uncertainty.getSeverity(),
-                uncertainty.getReason());
+                uncertainty.getField(), uncertainty.getCategory(), globalDiscriminator);
     }
 
     /** 解析本地、跨表或未知字段。 */
@@ -751,15 +1075,16 @@ public class ModelingDraftValidator {
             }
             return FieldResolution.unknown();
         }
-        String actual = baseTable.fields().get(normalize(field));
-        return actual == null ? FieldResolution.unknown() : FieldResolution.local(actual);
+        ColumnMetadata actual = baseTable.fields().get(normalize(field));
+        return actual == null ? FieldResolution.unknown()
+                : FieldResolution.local(actual.fieldName(), actual.dataType());
     }
 
     /** COUNT(*) 是唯一无需物理字段的合法指标。 */
     private FieldResolution resolveMetricField(String field, String aggregation,
             TableMetadata baseTable, Map<String, TableMetadata> allTables) {
         if ("COUNT".equals(aggregation) && "*".equals(field)) {
-            return FieldResolution.local("*");
+            return FieldResolution.local("*", null);
         }
         return resolveField(field, baseTable, allTables);
     }
@@ -802,7 +1127,10 @@ public class ModelingDraftValidator {
     public record ValidatedDraft(ModelingDraftPayload payload, String json) {}
 
     /** 单表元数据索引。 */
-    private record TableMetadata(String tableName, Map<String, String> fields) {}
+    private record TableMetadata(String tableName, Map<String, ColumnMetadata> fields) {}
+
+    /** 仅保存校验需要的物理列名和类型，不保留样例值或其他敏感元数据。 */
+    private record ColumnMetadata(String fieldName, String dataType) {}
 
     /** 字段解析类型。 */
     private enum FieldResolutionType {
@@ -812,22 +1140,25 @@ public class ModelingDraftValidator {
     /** 被单表约束移除的对象最小上下文，不保存对象正文或任何样例值。 */
     private record CrossTableObjectReference(String modelKey, String field) {}
 
-    /** 不确定项的稳定业务身份；审计 key 不参与比较，避免同一派生问题在多轮中重复。 */
+    /** 不确定项的稳定业务身份；展示属性不参与比较，避免同一业务问题在多轮中重复。 */
     private record UncertaintyIdentity(String modelKey, String objectKey, String field,
-            String category, String severity, String reason) {}
+            String category, String globalDiscriminator) {}
+
+    /** 已编译 Schema 与 Jackson 节点的只读构造期组合。 */
+    private record SchemaBundle(JsonNode node, JSONSchema schema) {}
 
     /** 字段解析结果。 */
-    private record FieldResolution(FieldResolutionType type, String field) {
-        private static FieldResolution local(String field) {
-            return new FieldResolution(FieldResolutionType.LOCAL, field);
+    private record FieldResolution(FieldResolutionType type, String field, String dataType) {
+        private static FieldResolution local(String field, String dataType) {
+            return new FieldResolution(FieldResolutionType.LOCAL, field, dataType);
         }
 
         private static FieldResolution crossTable() {
-            return new FieldResolution(FieldResolutionType.CROSS_TABLE, null);
+            return new FieldResolution(FieldResolutionType.CROSS_TABLE, null, null);
         }
 
         private static FieldResolution unknown() {
-            return new FieldResolution(FieldResolutionType.UNKNOWN, null);
+            return new FieldResolution(FieldResolutionType.UNKNOWN, null, null);
         }
     }
 }

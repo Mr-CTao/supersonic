@@ -21,6 +21,7 @@ import com.tencent.supersonic.headless.server.persistence.dataobject.ModelDO;
 import com.tencent.supersonic.headless.server.persistence.repository.DateInfoRepository;
 import com.tencent.supersonic.headless.server.persistence.repository.ModelRepository;
 import com.tencent.supersonic.headless.server.pojo.ModelFilter;
+import com.tencent.supersonic.headless.server.semantic.diagnostic.SemanticModelValidationService;
 import com.tencent.supersonic.headless.server.service.*;
 import com.tencent.supersonic.headless.server.utils.CoreComponentFactory;
 import com.tencent.supersonic.headless.server.utils.ModelConverter;
@@ -41,6 +42,12 @@ import java.util.stream.Collectors;
 
 import static com.tencent.supersonic.common.pojo.DimensionConstants.DIMENSION_TIME_FORMAT;
 
+/**
+ * 语义模型领域服务实现。
+ *
+ * <p>职责：处理模型创建、更新、发布、删除和事件通知；SQL 模型在事务写入前执行确定性编译门禁，
+ * 避免非法模型进入正式资产。批量发布逐模型校验，任一失败则整体不更新状态。
+ */
 @Service
 @Slf4j
 public class ModelServiceImpl implements ModelService {
@@ -64,6 +71,7 @@ public class ModelServiceImpl implements ModelService {
     private final ModelRelaService modelRelaService;
 
     private final ApplicationEventPublisher eventPublisher;
+    private final SemanticModelValidationService semanticModelValidationService;
 
     ExecutorService executor =
             new ThreadPoolExecutor(0, 5, 5L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
@@ -72,7 +80,8 @@ public class ModelServiceImpl implements ModelService {
             @Lazy DimensionService dimensionService, @Lazy MetricService metricService,
             DomainService domainService, UserService userService, DataSetService dataSetService,
             DateInfoRepository dateInfoRepository, ModelRelaService modelRelaService,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            SemanticModelValidationService semanticModelValidationService) {
         this.modelRepository = modelRepository;
         this.databaseService = databaseService;
         this.dimensionService = dimensionService;
@@ -83,11 +92,14 @@ public class ModelServiceImpl implements ModelService {
         this.dateInfoRepository = dateInfoRepository;
         this.modelRelaService = modelRelaService;
         this.eventPublisher = eventPublisher;
+        this.semanticModelValidationService = semanticModelValidationService;
     }
 
     @Override
     @Transactional
     public ModelResp createModel(ModelReq modelReq, User user) throws Exception {
+        // 编译门禁先于任何元数据写入；失败时事务内不会产生模型、维度或指标的部分数据。
+        semanticModelValidationService.validateForPublication(modelReq, user);
         // checkParams(modelReq);
         ModelDO modelDO = ModelConverter.convert(modelReq, user);
         modelRepository.createModel(modelDO);
@@ -117,6 +129,8 @@ public class ModelServiceImpl implements ModelService {
     @Override
     @Transactional
     public ModelResp updateModel(ModelReq modelReq, User user) throws Exception {
+        // 更新同样 fail-closed，不能把历史或新引入的非法模型 SQL 保存为可查询状态。
+        semanticModelValidationService.validateForPublication(modelReq, user);
         // Comment out below checks for now, they seem unnecessary and
         // lead to unexpected exception in updating model
         /*
@@ -501,6 +515,11 @@ public class ModelServiceImpl implements ModelService {
         List<ModelDO> modelDOS = modelRepository.getModelList(modelFilter);
         if (CollectionUtils.isEmpty(modelDOS)) {
             return;
+        }
+        if (StatusEnum.ONLINE.getCode().equals(metaBatchReq.getStatus())) {
+            // 上线前逐个重新读取并编译当前服务端版本，前端传入的旧校验结果不能作为放行依据。
+            modelDOS.stream().map(ModelConverter::convert).forEach(
+                    model -> semanticModelValidationService.validateForPublication(model, user));
         }
         modelDOS = modelDOS.stream().peek(modelDO -> {
             modelDO.setStatus(metaBatchReq.getStatus());

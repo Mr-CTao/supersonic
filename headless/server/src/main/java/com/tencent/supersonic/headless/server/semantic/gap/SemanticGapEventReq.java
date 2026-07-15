@@ -44,4 +44,18 @@ public class SemanticGapEventReq {
     private String s2sql;
 
     private String feedback;
+
+    private String diagnosticStage;
+
+    private String errorCode;
+
+    private String traceId;
+
+    private Integer errorLine;
+
+    private Integer errorColumn;
+
+    private String errorToken;
+
+    private String suggestion;
 }

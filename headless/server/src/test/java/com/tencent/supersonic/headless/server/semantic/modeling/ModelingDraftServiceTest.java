@@ -2,7 +2,9 @@ package com.tencent.supersonic.headless.server.semantic.modeling;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.headless.api.pojo.response.DatabaseResp;
+import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticModelingDraftAttemptDO;
 import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticModelingDraftDO;
 import com.tencent.supersonic.headless.server.persistence.mapper.SemanticModelingDraftAttemptMapper;
@@ -13,7 +15,14 @@ import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftCon
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftStore.CreateResult;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftStore.RegenerationResult;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftValidator.ValidatedDraft;
+import com.tencent.supersonic.headless.server.semantic.routing.ConfirmedSemanticAssetRoute;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetCandidate;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRouteAction;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingException;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingPermissionService;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingService;
 import com.tencent.supersonic.headless.server.service.DatabaseService;
+import com.tencent.supersonic.headless.server.service.ModelService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,10 +47,12 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -59,6 +70,7 @@ class ModelingDraftServiceTest {
 
     private static final Long DRAFT_ID = 101L;
     private static final Long DATA_SOURCE_ID = 7L;
+    private static final Long ROUTE_ANALYSIS_ID = 17L;
     private static final String IDEMPOTENCY_KEY = "draft-create-101";
     private static final long GENERATION_TIMEOUT_SECONDS = 180L;
 
@@ -90,6 +102,18 @@ class ModelingDraftServiceTest {
     private ModelingDraftValidator validator;
 
     @Mock
+    private ModelingDraftRouteGuard routeGuard;
+
+    @Mock
+    private SemanticAssetRoutingService routingService;
+
+    @Mock
+    private SemanticAssetRoutingPermissionService routingPermissionService;
+
+    @Mock
+    private ModelService modelService;
+
+    @Mock
     private ThreadPoolTaskExecutor executor;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -104,9 +128,16 @@ class ModelingDraftServiceTest {
         properties.setGenerationTimeoutSeconds(GENERATION_TIMEOUT_SECONDS);
         lenient().when(writePermissionService.requireManageable(anyLong(), any(User.class)))
                 .thenAnswer(invocation -> draftMapper.selectById(invocation.getArgument(0)));
+        lenient().when(routingService.requireConsumableRoute(eq(ROUTE_ANALYSIS_ID), eq(user)))
+                .thenReturn(confirmedRoute(ModelingDraftConstants.SOURCE_DATA_SOURCE, null,
+                        DATA_SOURCE_ID));
+        lenient().when(routingService.requireBoundRoute(eq(ROUTE_ANALYSIS_ID), anyLong(), eq(user)))
+                .thenReturn(confirmedRoute(ModelingDraftConstants.SOURCE_DATA_SOURCE, null,
+                        DATA_SOURCE_ID));
         service = new ModelingDraftService(contextBuilder, store, worker, draftMapper,
                 attemptMapper, versionMapper, databaseService, writePermissionService, validator,
-                properties, executor, objectMapper);
+                routeGuard, routingService, routingPermissionService, modelService, properties,
+                executor, objectMapper);
     }
 
     /** 幂等重放必须复用既有 ID，并禁止再次向生成执行器提交任务。 */
@@ -129,12 +160,35 @@ class ModelingDraftServiceTest {
         verifyNoInteractions(executor, worker);
     }
 
+    /** 快速幂等重放必须重新校验路由绑定、目标权限/版本和首次请求指纹。 */
+    @Test
+    void shouldRevalidateBoundRouteAndFingerprintForFastCreationReplay() {
+        ModelingDraftGenerateReq request = newGenerateRequest();
+        SemanticModelingDraftDO draft = newDraft(ModelingDraftConstants.STATUS_GENERATING);
+        when(store.findByIdempotencyKey(user.getName(), IDEMPOTENCY_KEY)).thenReturn(draft);
+        when(contextBuilder.preflight(request, user)).thenReturn(newSnapshot(request));
+        when(databaseService.getDatabase(DATA_SOURCE_ID, user))
+                .thenReturn(DatabaseResp.builder().id(DATA_SOURCE_ID).build());
+
+        ModelingDraftResp response = service.create(request, IDEMPOTENCY_KEY, user);
+
+        assertEquals(DRAFT_ID, response.getId());
+        assertTrue(response.getIdempotentReplay());
+        verify(routingService, times(2)).requireBoundRoute(ROUTE_ANALYSIS_ID, DRAFT_ID, user);
+        verify(store).validateCreationReplay(eq(DRAFT_ID), anyString(), eq(draft));
+        verify(store, never()).createGenerating(any(), anyString(), anyString(), any());
+        verifyNoInteractions(executor, worker);
+    }
+
     /** Gap 去重复用其他草稿时必须按被复用草稿的数据源复核 ACL，禁止返回越权内容。 */
     @Test
     void shouldRejectGapReplayWhenActiveDraftDataSourceIsNotAccessible() {
         ModelingDraftGenerateReq request = newGenerateRequest();
         request.setSourceType(ModelingDraftConstants.SOURCE_SEMANTIC_GAP);
         request.setSourceId(55L);
+        when(routingService.requireConsumableRoute(ROUTE_ANALYSIS_ID, user))
+                .thenReturn(confirmedRoute(ModelingDraftConstants.SOURCE_SEMANTIC_GAP, 55L,
+                        DATA_SOURCE_ID));
         PreflightSnapshot snapshot = newSnapshot(request);
         SemanticModelingDraftDO activeDraft = newDraft(ModelingDraftConstants.STATUS_GENERATING);
         activeDraft.setSourceType(ModelingDraftConstants.SOURCE_SEMANTIC_GAP);
@@ -289,6 +343,87 @@ class ModelingDraftServiceTest {
         verify(store).failStaleGenerations(any(Date.class));
     }
 
+    /** 增强草稿详情必须复核目标模型 VIEWER 权限，且响应 JSON 绝不能包含正式模型 ID。 */
+    @Test
+    void shouldRecheckExtendTargetAndRedactFormalAssetIdFromDetail() {
+        SemanticModelingDraftDO draft = extendDraft(DRAFT_ID, 501L);
+        when(draftMapper.selectById(DRAFT_ID)).thenReturn(draft);
+        when(databaseService.getDatabase(DATA_SOURCE_ID, user))
+                .thenReturn(DatabaseResp.builder().id(DATA_SOURCE_ID).build());
+
+        ModelingDraftResp response = service.get(DRAFT_ID, user);
+
+        assertFalse(objectMapper.valueToTree(response).has("routeTargetAssetId"));
+        ArgumentCaptor<SemanticAssetCandidate> targetCaptor =
+                ArgumentCaptor.forClass(SemanticAssetCandidate.class);
+        verify(routingPermissionService).requireReadableCandidateVersion(targetCaptor.capture(),
+                eq(user));
+        assertEquals(501L, targetCaptor.getValue().getAssetId());
+        assertEquals(7L, targetCaptor.getValue().getAssetVersion());
+    }
+
+    /** 目标删除和撤权均应折叠为同一草稿不可访问结果，禁止透传权限服务中的差异信息。 */
+    @Test
+    void shouldCollapseRevokedOrDeletedExtendTargetIntoSafeUnavailable() {
+        SemanticModelingDraftDO draft = extendDraft(DRAFT_ID, 501L);
+        when(draftMapper.selectById(DRAFT_ID)).thenReturn(draft);
+        when(databaseService.getDatabase(DATA_SOURCE_ID, user))
+                .thenReturn(DatabaseResp.builder().id(DATA_SOURCE_ID).build());
+        when(routingPermissionService.requireReadableCandidateVersion(any(), eq(user)))
+                .thenThrow(new SemanticAssetRoutingException(HttpStatus.NOT_FOUND,
+                        "TARGET_DELETED", "model 501 was deleted"))
+                .thenThrow(new SemanticAssetRoutingException(HttpStatus.NOT_FOUND,
+                        "TARGET_REVOKED", "permission denied for model 501"));
+
+        ModelingDraftException deleted = assertThrows(ModelingDraftException.class,
+                () -> service.get(DRAFT_ID, user));
+        ModelingDraftException revoked = assertThrows(ModelingDraftException.class,
+                () -> service.get(DRAFT_ID, user));
+
+        assertEquals(HttpStatus.NOT_FOUND, deleted.getStatus());
+        assertEquals(HttpStatus.NOT_FOUND, revoked.getStatus());
+        assertEquals(deleted.getErrorCode(), revoked.getErrorCode());
+        assertEquals("语义建模草稿不存在或不可访问", deleted.getMessage());
+        assertEquals(deleted.getMessage(), revoked.getMessage());
+        assertFalse(deleted.getMessage().contains("501"));
+        assertFalse(revoked.getMessage().contains("permission"));
+    }
+
+    /**
+     * 列表应一次批量获取模型 VIEWER ACL，并保留历史/新建草稿、过滤不可见增强草稿。
+     */
+    @Test
+    void shouldBatchFilterUnreadableExtendTargetsWithoutAffectingOtherDrafts() {
+        User viewer = User.getVisitUser();
+        SemanticModelingDraftDO readableExtend = extendDraft(101L, 501L);
+        SemanticModelingDraftDO revokedExtend = extendDraft(102L, 502L);
+        SemanticModelingDraftDO createNew = newDraft(ModelingDraftConstants.STATUS_DRAFT);
+        createNew.setId(103L);
+        SemanticModelingDraftDO historical = newDraft(ModelingDraftConstants.STATUS_DRAFT);
+        historical.setId(104L);
+        historical.setRouteAnalysisId(null);
+        historical.setRouteAction(null);
+        ModelResp readableModel = new ModelResp();
+        readableModel.setId(501L);
+        when(databaseService.getDatabaseList(viewer))
+                .thenReturn(List.of(DatabaseResp.builder().id(DATA_SOURCE_ID).build()));
+        when(modelService.getModelListWithAuth(eq(viewer), isNull(), eq(AuthType.VIEWER)))
+                .thenReturn(List.of(readableModel));
+        when(draftMapper.selectList(any()))
+                .thenReturn(List.of(readableExtend, revokedExtend, createNew, historical));
+
+        service.query(new ModelingDraftQueryReq(), viewer);
+
+        Set<Long> readableModelIds = Set.of(501L);
+        assertTrue(service.isRouteTargetReadable(readableExtend, readableModelIds));
+        assertFalse(service.isRouteTargetReadable(revokedExtend, readableModelIds));
+        assertTrue(service.isRouteTargetReadable(createNew, readableModelIds));
+        assertTrue(service.isRouteTargetReadable(historical, readableModelIds));
+        verify(modelService, times(1)).getModelListWithAuth(eq(viewer), isNull(),
+                eq(AuthType.VIEWER));
+        verifyNoInteractions(routingPermissionService);
+    }
+
     /** 可读取但不可管理的账号必须收到显式只读能力，供前端隐藏阶段 4 写入口。 */
     @Test
     void shouldExposeReadOnlyCapabilityOnDraftDetail() {
@@ -382,6 +517,7 @@ class ModelingDraftServiceTest {
     private ModelingDraftGenerateReq newGenerateRequest() {
         ModelingDraftGenerateReq request = new ModelingDraftGenerateReq();
         request.setSourceType(ModelingDraftConstants.SOURCE_DATA_SOURCE);
+        request.setRouteAnalysisId(ROUTE_ANALYSIS_ID);
         request.setBusinessGoal("分析订单销售额");
         request.setDataSourceId(DATA_SOURCE_ID);
         request.setCatalogName("catalog");
@@ -410,6 +546,8 @@ class ModelingDraftServiceTest {
         draft.setSelectedTables("[\"orders\"]");
         draft.setChatModelId(3);
         draft.setIncludeSample(false);
+        draft.setRouteAnalysisId(ROUTE_ANALYSIS_ID);
+        draft.setRouteAction(ModelingDraftConstants.ACTION_CREATE_NEW);
         draft.setStatus(status);
         draft.setCurrentVersionNo(ModelingDraftConstants.STATUS_DRAFT.equals(status) ? 1 : 0);
         draft.setCurrentAttemptNo(1);
@@ -417,5 +555,30 @@ class ModelingDraftServiceTest {
         draft.setCreatedBy(user.getName());
         draft.setUpdatedBy(user.getName());
         return draft;
+    }
+
+    /** 构造带已确认目标快照的增强草稿，正式模型 ID 只存在于服务端 DO。 */
+    private SemanticModelingDraftDO extendDraft(Long draftId, Long targetModelId) {
+        SemanticModelingDraftDO draft = newDraft(ModelingDraftConstants.STATUS_DRAFT);
+        draft.setId(draftId);
+        draft.setDomainId(5L);
+        draft.setRouteAction(ModelingDraftConstants.ACTION_EXTEND_EXISTING);
+        draft.setRouteTargetAssetType("MODEL");
+        draft.setRouteTargetAssetId(targetModelId);
+        draft.setRouteTargetAssetVersion(7L);
+        return draft;
+    }
+
+    /** 构造与测试请求一致的已确认新建路由。 */
+    private ConfirmedSemanticAssetRoute confirmedRoute(String sourceType, Long sourceId,
+            Long dataSourceId) {
+        return ConfirmedSemanticAssetRoute.builder().routeAnalysisId(ROUTE_ANALYSIS_ID)
+                .sourceType(sourceType).sourceId(sourceId).businessGoal("分析订单销售额")
+                .dataSourceId(dataSourceId).catalogName("catalog").databaseName("warehouse")
+                .selectedTables(List.of("orders")).chatModelId(3).includeSampleData(false)
+                .action(SemanticAssetRouteAction.CREATE_NEW)
+                .promptContext(Map.of("schemaVersion", "2.0", "action", "CREATE_NEW",
+                        "routeSummary", Map.of("routeAnalysisId", ROUTE_ANALYSIS_ID)))
+                .build();
     }
 }

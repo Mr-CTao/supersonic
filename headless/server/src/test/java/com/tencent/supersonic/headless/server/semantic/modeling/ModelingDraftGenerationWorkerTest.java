@@ -12,6 +12,7 @@ import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftContextBuilder.GenerationContext;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftContextBuilder.PreflightSnapshot;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftValidator.ValidatedDraft;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -66,6 +67,10 @@ class ModelingDraftGenerationWorkerTest {
 
     @Mock
     private ModelingDraftValidator validator;
+    @Mock
+    private ModelingDraftRouteGuard routeGuard;
+    @Mock
+    private SemanticAssetRoutingService routingService;
 
     @Mock
     private LlmConversationGatewayService gatewayService;
@@ -98,8 +103,8 @@ class ModelingDraftGenerationWorkerTest {
                 "output contract", jsonSchema, Map.of(), Set.of());
         properties.setRepairAttempts(1);
         properties.setGenerationTimeoutSeconds(30);
-        worker = new ModelingDraftGenerationWorker(store, contextBuilder, validator, gatewayService,
-                properties, objectMapper);
+        worker = new ModelingDraftGenerationWorker(store, contextBuilder, validator, routeGuard,
+                routingService, gatewayService, properties, objectMapper);
 
     }
 
@@ -255,7 +260,7 @@ class ModelingDraftGenerationWorkerTest {
                         "com.tencent.supersonic.headless.server.service.DimensionService",
                         "com.tencent.supersonic.headless.server.service.MetricService",
                         "com.tencent.supersonic.headless.server.service.TermService");
-        List<Class<?>> fieldTypes =
+        List<? extends Class<?>> fieldTypes =
                 Arrays.stream(ModelingDraftGenerationWorker.class.getDeclaredFields())
                         .map(java.lang.reflect.Field::getType).toList();
 

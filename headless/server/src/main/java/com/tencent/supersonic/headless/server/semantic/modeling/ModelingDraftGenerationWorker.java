@@ -9,6 +9,7 @@ import com.tencent.supersonic.common.llm.LlmConversationResp;
 import com.tencent.supersonic.common.llm.LlmMessageCreateReq;
 import com.tencent.supersonic.common.llm.LlmMessageCreateResp;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingService;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftContextBuilder.GenerationContext;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftContextBuilder.PreflightSnapshot;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftValidator.ValidatedDraft;
@@ -33,6 +34,8 @@ public class ModelingDraftGenerationWorker {
     private final ModelingDraftStore store;
     private final ModelingDraftContextBuilder contextBuilder;
     private final ModelingDraftValidator validator;
+    private final ModelingDraftRouteGuard routeGuard;
+    private final SemanticAssetRoutingService routingService;
     private final LlmConversationGatewayService gatewayService;
     private final SemanticModelingProperties properties;
     private final ObjectMapper objectMapper;
@@ -43,17 +46,22 @@ public class ModelingDraftGenerationWorker {
      * @param store 草稿短事务服务。
      * @param contextBuilder 安全上下文构建器。
      * @param validator 草稿校验器。
+     * @param routeGuard 路由快照不可漂移校验器。
+     * @param routingService 路由权限、版本和消费绑定校验服务。
      * @param gatewayService 阶段 1 LLM Gateway。
      * @param properties 阶段 3 配置。
      * @param objectMapper JSON 映射器。
      */
     public ModelingDraftGenerationWorker(ModelingDraftStore store,
             ModelingDraftContextBuilder contextBuilder, ModelingDraftValidator validator,
+            ModelingDraftRouteGuard routeGuard, SemanticAssetRoutingService routingService,
             LlmConversationGatewayService gatewayService, SemanticModelingProperties properties,
             ObjectMapper objectMapper) {
         this.store = store;
         this.contextBuilder = contextBuilder;
         this.validator = validator;
+        this.routeGuard = routeGuard;
+        this.routingService = routingService;
         this.gatewayService = gatewayService;
         this.properties = properties;
         this.objectMapper = objectMapper;
@@ -87,6 +95,11 @@ public class ModelingDraftGenerationWorker {
         String failureStage = ModelingDraftConstants.FAILURE_STAGE_CONTEXT;
         String result = "FAILED";
         try {
+            if (snapshot.request().getRouteAnalysisId() != null) {
+                // Worker 认领后、调用慢速 Provider 前再检查一次，阻止已漂移目标进入 LLM 上下文。
+                routingService.requireBoundRoute(snapshot.request().getRouteAnalysisId(), draftId,
+                        user);
+            }
             GenerationContext context = contextBuilder.build(snapshot, user);
             LlmConversationResp conversation = createConversation(draftId, snapshot, context, user);
             conversationId = conversation.getConversationId();
@@ -109,6 +122,7 @@ public class ModelingDraftGenerationWorker {
                 failureStage = ModelingDraftConstants.FAILURE_STAGE_VALIDATE;
                 validated = validator.validateAndNormalize(firstCandidate, context.columnsByTable(),
                         context.existingNames());
+                routeGuard.validateGenerated(validated.payload(), snapshot.request());
             } catch (ModelingDraftException firstValidationError) {
                 if (properties.getRepairAttempts() < 1) {
                     throw new GenerationFailure(ModelingDraftConstants.ERROR_OUTPUT_INVALID,
@@ -131,6 +145,7 @@ public class ModelingDraftGenerationWorker {
                 try {
                     validated = validator.validateAndNormalize(repairCandidate,
                             context.columnsByTable(), context.existingNames());
+                    routeGuard.validateGenerated(validated.payload(), snapshot.request());
                 } catch (ModelingDraftException repairValidationError) {
                     throw new GenerationFailure(ModelingDraftConstants.ERROR_OUTPUT_INVALID,
                             ModelingDraftConstants.FAILURE_STAGE_REPAIR, "模型输出修复后仍未通过结构化草稿校验",

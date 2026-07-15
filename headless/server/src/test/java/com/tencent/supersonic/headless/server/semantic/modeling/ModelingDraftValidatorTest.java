@@ -76,6 +76,192 @@ class ModelingDraftValidatorTest {
         }
     }
 
+    /** 路由感知的增量示例必须只保留 additions，且目标资产名称不得被误报为新增别名冲突。 */
+    @Test
+    void shouldKeepBundledIncrementalExampleValidWithoutTargetNameConflict() throws Exception {
+        try (InputStream input = getClass().getClassLoader()
+                .getResourceAsStream("schema/semantic-modeling-draft-v2-example.json")) {
+            assertThat(input).isNotNull();
+            String json = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+
+            ValidatedDraft result = validator.validateAndNormalize(json,
+                    Map.of("stock_summary", List.of(column("inbound_date", "DATE"))),
+                    Set.of("库存汇总"));
+
+            assertThat(result.payload().getSchemaVersion()).isEqualTo("2.0");
+            assertThat(result.payload().getAction()).isEqualTo("EXTEND_EXISTING");
+            assertThat(result.payload().getModels()).isEmpty();
+            assertThat(result.payload().getAdditions().getDimensions()).singleElement()
+                    .satisfies(dimension -> {
+                        assertThat(dimension.getField()).isEqualTo("sluggish_duration_days");
+                        assertThat(dimension.getDerivation().getStartField())
+                                .isEqualTo("inbound_date");
+                    });
+            assertThat(result.payload().getUncertainties()).isEmpty();
+        }
+    }
+
+    /** 增量对象仍需与其他已有资产比较名称，避免因 additions-only 放宽检索污染门禁。 */
+    @Test
+    void shouldReportExternalNameConflictForIncrementalAddition() throws Exception {
+        try (InputStream input = getClass().getClassLoader()
+                .getResourceAsStream("schema/semantic-modeling-draft-v2-example.json")) {
+            assertThat(input).isNotNull();
+            String json = new String(input.readAllBytes(), StandardCharsets.UTF_8)
+                    .replace("\"name\": \"呆滞时长\"", "\"name\": \"物料编码\"");
+
+            ValidatedDraft result = validator.validateAndNormalize(json,
+                    Map.of("stock_summary", List.of(column("inbound_date", "DATE"))),
+                    Set.of("物料编码"));
+
+            assertThat(result.payload().getAdditions().getDimensions()).hasSize(1);
+            assertThat(result.payload().getUncertainties())
+                    .filteredOn(uncertainty -> "ALIAS_CONFLICT".equals(uncertainty.getCategory()))
+                    .singleElement()
+                    .satisfies(uncertainty -> {
+                        assertThat(uncertainty.getObjectKey()).isEqualTo("sluggishDuration");
+                        assertThat(uncertainty.getSeverity()).isEqualTo("BLOCKING");
+                    });
+        }
+    }
+
+    /** additions.aliases 属于会进入目标模型召回词典的新内容，必须与既有资产做阻塞级比较。 */
+    @Test
+    void shouldBlockIncrementalModelAliasConflictingWithExistingAsset() throws Exception {
+        String json = incrementalDraftJson().replace("\"aliases\": [],\n    \"sampleQuestions\"",
+                "\"aliases\": [\"共享库存\"],\n    \"sampleQuestions\"");
+
+        ValidatedDraft result = validator.validateAndNormalize(json,
+                Map.of("stock_summary", List.of(column("inbound_date", "DATE"))),
+                Set.of("共享库存"));
+
+        assertThat(result.payload().getUncertainties())
+                .filteredOn(item -> "ALIAS_CONFLICT".equals(item.getCategory()))
+                .singleElement().satisfies(item -> {
+                    assertThat(item.getModelKey()).isEqualTo("candidate_1");
+                    assertThat(item.getSeverity()).isEqualTo("BLOCKING");
+                });
+    }
+
+    /** CREATE_NEW 与现有资产重名时必须阻塞，不能再以普通 WARNING 放行。 */
+    @Test
+    void shouldBlockCreateNewNameConflict() {
+        ValidatedDraft result = validator.validateAndNormalize(validDraftJson(), columnsByTable(),
+                Set.of("订单金额"));
+
+        assertThat(result.payload().getUncertainties())
+                .filteredOn(item -> "ALIAS_CONFLICT".equals(item.getCategory())
+                        && "orderAmount".equals(item.getObjectKey()))
+                .singleElement().extracting(ModelingDraftPayload.UncertaintyDraft::getSeverity)
+                .isEqualTo("BLOCKING");
+    }
+
+    /** DATE_DIFF 起始列即使真实存在，也不能使用数值或文本类型伪装日期口径。 */
+    @Test
+    void shouldRejectNonTemporalDerivedField() throws Exception {
+        String json = incrementalDraftJson();
+
+        assertThatThrownBy(() -> validator.validateAndNormalize(json,
+                Map.of("stock_summary", List.of(column("inbound_date", "BIGINT"))), Set.of()))
+                        .isInstanceOf(ModelingDraftException.class).satisfies(throwable -> {
+                            ModelingDraftException exception = (ModelingDraftException) throwable;
+                            assertThat(exception.getIssues()).anySatisfy(issue -> {
+                                assertThat(issue.getCode())
+                                        .isEqualTo("DERIVATION_FIELD_NOT_TEMPORAL");
+                                assertThat(issue.getPath())
+                                        .isEqualTo("$.additions.dimensions[0].derivation.startField");
+                            });
+                        });
+    }
+
+    /** 第一版只允许修改目标模型本身，未知子对象不能凭 LLM objectKey 越过目标范围。 */
+    @Test
+    void shouldBlockUnverifiableChildObjectModification() throws Exception {
+        String modification = """
+                [{"objectType":"METRIC","objectKey":"formalMetric",\
+                "field":"description","beforeValue":"旧说明",\
+                "afterValue":"新说明","reason":"补充业务含义"}]
+                """;
+        String json = incrementalDraftJson().replace("\"modifications\": []",
+                "\"modifications\": " + modification);
+
+        ValidatedDraft result = validator.validateAndNormalize(json,
+                Map.of("stock_summary", List.of(column("inbound_date", "DATE"))), Set.of());
+
+        assertThat(result.payload().getUncertainties())
+                .filteredOn(item -> "UNAUTHORIZED_MODIFICATION".equals(item.getCategory()))
+                .singleElement().satisfies(item -> {
+                    assertThat(item.getObjectKey()).isEqualTo("formalMetric");
+                    assertThat(item.getSeverity()).isEqualTo("BLOCKING");
+                });
+    }
+
+    /** aliases before/after 只允许追加，删除正式别名必须形成阻塞项。 */
+    @Test
+    void shouldBlockAliasDeletionFromModification() throws Exception {
+        String modification = """
+                [{"objectType":"MODEL","objectKey":"candidate_1",\
+                "field":"aliases","beforeValue":["库存","现存"],\
+                "afterValue":["库存"],"reason":"精简别名"}]
+                """;
+        String json = incrementalDraftJson().replace("\"modifications\": []",
+                "\"modifications\": " + modification);
+
+        ValidatedDraft result = validator.validateAndNormalize(json,
+                Map.of("stock_summary", List.of(column("inbound_date", "DATE"))), Set.of());
+
+        assertThat(result.payload().getUncertainties())
+                .filteredOn(item -> "UNAUTHORIZED_MODIFICATION".equals(item.getCategory()))
+                .singleElement().extracting(ModelingDraftPayload.UncertaintyDraft::getSeverity)
+                .isEqualTo("BLOCKING");
+    }
+
+    /** 合法模型说明修改可以保留，但不得被误报成跨目标操作。 */
+    @Test
+    void shouldAllowAuditableTargetModelDescriptionModification() throws Exception {
+        String modification = """
+                [{"objectType":"MODEL","objectKey":"candidate_1",\
+                "field":"description","beforeValue":"旧说明",\
+                "afterValue":"补充库存呆滞分析说明","reason":"补足业务边界"}]
+                """;
+        String json = incrementalDraftJson().replace("\"modifications\": []",
+                "\"modifications\": " + modification);
+
+        ValidatedDraft result = validator.validateAndNormalize(json,
+                Map.of("stock_summary", List.of(column("inbound_date", "DATE"))), Set.of());
+
+        assertThat(result.payload().getModifications()).hasSize(1);
+        assertThat(result.payload().getUncertainties())
+                .noneMatch(item -> "UNAUTHORIZED_MODIFICATION".equals(item.getCategory()));
+    }
+
+    /** 空回归问法不能被静默忽略，必须显式产生阻塞级验证要求。 */
+    @Test
+    void shouldBlockIncrementalDraftWithoutRegressionQuestion() throws Exception {
+        String json = incrementalDraftJson().replace(
+                "\"regressionQuestions\": [\"按派生时长查看前十条记录\"]",
+                "\"regressionQuestions\": []");
+
+        ValidatedDraft result = validator.validateAndNormalize(json,
+                Map.of("stock_summary", List.of(column("inbound_date", "DATE"))), Set.of());
+
+        assertThat(result.payload().getUncertainties())
+                .filteredOn(item -> "REGRESSION_VALIDATION_REQUIRED".equals(item.getCategory()))
+                .singleElement().extracting(ModelingDraftPayload.UncertaintyDraft::getSeverity)
+                .isEqualTo("BLOCKING");
+    }
+
+    /** 回归问法与新增样例共同进入请求内真实验证视图，并按原文去重。 */
+    @Test
+    void shouldMergeRegressionQuestionsIntoValidationView() throws Exception {
+        ValidatedDraft result = validator.validateAndNormalize(incrementalDraftJson(),
+                Map.of("stock_summary", List.of(column("inbound_date", "DATE"))), Set.of());
+
+        assertThat(result.payload().validationView().getModels()).singleElement()
+                .satisfies(model -> assertThat(model.getSampleQuestions())
+                        .containsExactly("按派生时长查看前十条记录"));
+    }
+
     /** 结构预检必须一次聚合缺失和未知字段，避免修复轮只补一个 required 字段。 */
     @Test
     void shouldAggregateStructuralIssuesForWrongModelShape() {
@@ -273,6 +459,30 @@ class ModelingDraftValidatorTest {
                 .hasSameSizeAs(first.payload().getUncertainties());
     }
 
+    /** 同一业务问题的文案或严重度变化不能制造新行，并且去重时必须保留更严格的门禁级别。 */
+    @Test
+    void shouldDeduplicateUncertaintyByStableBusinessIdentityAndKeepHighestSeverity() {
+        String duplicate = """
+                {"key":"uncertainty_duplicate","modelKey":"salesModel",\
+                "objectKey":"orderRegion","field":"status","category":"UNKNOWN_STATUS",\
+                "severity":"BLOCKING","reason":"状态口径仍未确认"}
+                """;
+        String json = validDraftJson().replace("\"uncertainties\": []",
+                "\"uncertainties\": [" + duplicate + ","
+                        + duplicate.replace("uncertainty_duplicate", "uncertainty_duplicate_2")
+                                .replace("BLOCKING", "WARNING")
+                                .replace("状态口径仍未确认", "请确认状态枚举含义")
+                        + "]");
+
+        ValidatedDraft result = validator.validateAndNormalize(json, columnsByTable(), Set.of());
+
+        assertThat(result.payload().getUncertainties())
+                .filteredOn(item -> "UNKNOWN_STATUS".equals(item.getCategory())
+                        && "orderRegion".equals(item.getObjectKey())
+                        && "status".equals(item.getField()))
+                .singleElement().satisfies(item -> assertThat(item.getSeverity()).isEqualTo("BLOCKING"));
+    }
+
     /** 验证校验器不持有正式资产写服务或事件总线，因而无法产生发布与知识刷新副作用。 */
     @Test
     void shouldRemainDetachedFromFormalAssetWritePath() {
@@ -317,6 +527,15 @@ class ModelingDraftValidatorTest {
     /** 创建最小物理字段元数据；字段类型分类与本测试的存在性校验无关。 */
     private DBColumn column(String name, String dataType) {
         return new DBColumn(name, dataType, name, null);
+    }
+
+    /** 读取仓库内置的通用增量草稿夹具，避免测试绑定任何生产模型 ID。 */
+    private String incrementalDraftJson() throws Exception {
+        try (InputStream input = getClass().getClassLoader()
+                .getResourceAsStream("schema/semantic-modeling-draft-v2-example.json")) {
+            assertThat(input).isNotNull();
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     /** 构造包含模型、维度、指标、敏感字段、示例问法与本地术语引用的合法草稿。 */

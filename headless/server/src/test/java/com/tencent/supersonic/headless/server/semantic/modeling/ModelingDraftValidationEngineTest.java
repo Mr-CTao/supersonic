@@ -115,9 +115,9 @@ class ModelingDraftValidationEngineTest {
         assertThat(outcome.getSqlSafetyResult().getStatus()).isEqualTo("FAILED");
     }
 
-    /** 名称冲突虽展示为警告，但对应未处理不确定项仍必须阻断提交审批。 */
+    /** 普通名称冲突的 WARNING 必须与页面严重级别一致，只警告而不阻断提交。 */
     @Test
-    void shouldKeepConflictWarningAndBlockUnresolvedUncertainty() {
+    void shouldKeepConflictWarningWithoutBlockingSubmission() {
         UncertaintyDraft uncertainty = new UncertaintyDraft();
         uncertainty.setKey("uncertainty_1");
         uncertainty.setModelKey("orders_model");
@@ -132,8 +132,69 @@ class ModelingDraftValidationEngineTest {
         assertThat(outcome.getWarningItems()).extracting(ModelingValidationFinding::getCode)
                 .contains("NAME_OR_ALIAS_CONFLICT");
         assertThat(outcome.getBlockingItems()).extracting(ModelingValidationFinding::getCode)
+                .doesNotContain("UNRESOLVED_UNCERTAINTY");
+        assertThat(outcome.resolveStatus()).isEqualTo(ModelingDraftConstants.VALIDATION_WARNING);
+    }
+
+    /** Validator 产生的阻塞级重名只应映射为一个专用 finding，不得再重复追加通用不确定项。 */
+    @Test
+    void shouldBlockNameConflictWithoutDuplicateUncertaintyFinding() {
+        UncertaintyDraft uncertainty = new UncertaintyDraft();
+        uncertainty.setKey("uncertainty_conflict");
+        uncertainty.setModelKey("orders_model");
+        uncertainty.setObjectKey("order_amount");
+        uncertainty.setCategory("ALIAS_CONFLICT");
+        uncertainty.setSeverity("BLOCKING");
+        uncertainty.setReason("订单金额与现有资产重名");
+        ModelingDraftPayload payload = payload(true, List.of("订单金额是多少"), List.of(uncertainty));
+
+        ModelingDraftValidationOutcome outcome = engine.validate(payload, columns(), 1L, user, 20);
+
+        assertThat(outcome.getBlockingItems())
+                .filteredOn(item -> "NAME_OR_ALIAS_CONFLICT".equals(item.getCode()))
+                .singleElement();
+        assertThat(outcome.getBlockingItems()).extracting(ModelingValidationFinding::getCode)
+                .doesNotContain("UNRESOLVED_UNCERTAINTY");
+        assertThat(outcome.getConflictResult().getStatus())
+                .isEqualTo(ModelingDraftConstants.VALIDATION_FAILED);
+    }
+
+    /** 粒度、敏感字段等高风险分类即使被错误标成 WARNING，服务端策略也必须升级为阻塞。 */
+    @Test
+    void shouldUpgradeHighRiskUncertaintyToBlocking() {
+        UncertaintyDraft uncertainty = new UncertaintyDraft();
+        uncertainty.setKey("uncertainty_grain");
+        uncertainty.setModelKey("orders_model");
+        uncertainty.setCategory("BUSINESS_GRAIN");
+        uncertainty.setSeverity("WARNING");
+        uncertainty.setReason("订单模型的事实粒度尚未确认");
+        ModelingDraftPayload payload = payload(true, List.of("订单金额是多少"), List.of(uncertainty));
+
+        ModelingDraftValidationOutcome outcome = engine.validate(payload, columns(), 1L, user, 20);
+
+        assertThat(outcome.getBlockingItems()).extracting(ModelingValidationFinding::getCode)
                 .contains("UNRESOLVED_UNCERTAINTY");
         assertThat(outcome.resolveStatus()).isEqualTo(ModelingDraftConstants.VALIDATION_FAILED);
+    }
+
+    /** INFO 只提供解释信息，不应进入 warning 或 blocking 门禁集合。 */
+    @Test
+    void shouldKeepInformationalUncertaintyNonBlocking() {
+        UncertaintyDraft uncertainty = new UncertaintyDraft();
+        uncertainty.setKey("uncertainty_info");
+        uncertainty.setModelKey("orders_model");
+        uncertainty.setCategory("ROUTING_EVIDENCE");
+        uncertainty.setSeverity("INFO");
+        uncertainty.setReason("Top N 将由查询层处理");
+        ModelingDraftPayload payload = payload(true, List.of("订单金额是多少"), List.of(uncertainty));
+
+        ModelingDraftValidationOutcome outcome = engine.validate(payload, columns(), 1L, user, 20);
+
+        assertThat(outcome.getBlockingItems()).extracting(ModelingValidationFinding::getCode)
+                .doesNotContain("UNRESOLVED_UNCERTAINTY");
+        assertThat(outcome.getWarningItems()).extracting(ModelingValidationFinding::getCode)
+                .doesNotContain("UNRESOLVED_UNCERTAINTY");
+        assertThat(outcome.resolveStatus()).isEqualTo(ModelingDraftConstants.VALIDATION_PASSED);
     }
 
     /** 显式 HIGH/CRITICAL 声明是强证据，即使字段名未命中启发式规则也禁止 NONE。 */
@@ -260,6 +321,32 @@ class ModelingDraftValidationEngineTest {
                 .doesNotContain("RETRIEVAL_HIGH_FREQUENCY_POLLUTION");
     }
 
+    /** additions.aliases 必须进入与普通模型别名相同的召回污染检查。 */
+    @Test
+    void shouldInspectIncrementalModelAliasesForRetrievalPollution() {
+        ModelingDraftPayload payload = incrementalPayload("数据", "订单金额是多少");
+
+        ModelingDraftValidationOutcome outcome = engine.validate(payload, columns(), 1L, user, 20);
+
+        assertThat(outcome.getBlockingItems())
+                .filteredOn(item -> "RETRIEVAL_HIGH_FREQUENCY_POLLUTION".equals(item.getCode()))
+                .singleElement().satisfies(item -> {
+                    assertThat(item.getObjectType()).isEqualTo("MODEL");
+                    assertThat(item.getPath()).isEqualTo("$.additions.aliases[0]");
+                });
+    }
+
+    /** 增量回归问法会作为真实样例进入隔离语义链路，而不是仅保存在 JSON 中。 */
+    @Test
+    void shouldExecuteIncrementalRegressionQuestionInSemanticValidation() {
+        ModelingDraftPayload payload = incrementalPayload("库存汇总", "订单金额是多少");
+
+        ModelingDraftValidationOutcome outcome = engine.validate(payload, columns(), 1L, user, 20);
+
+        assertThat(outcome.getSampleQuestionResults())
+                .extracting(ModelingSampleQuestionResult::getQuestion).containsExactly("订单金额是多少");
+    }
+
     /** 构造十项默认 PASSED、可覆盖一个状态的门禁结果。 */
     private ModelingDraftValidationOutcome outcomeWithRequiredStatus(String category,
             String status) {
@@ -329,6 +416,38 @@ class ModelingDraftValidationEngineTest {
         payload.setModels(new ArrayList<>(List.of(model)));
         payload.setTerms(new ArrayList<>());
         payload.setUncertainties(new ArrayList<>(uncertainties));
+        return payload;
+    }
+
+    /** 把通用订单夹具映射为 additions-only 增量草稿，不依赖任何生产资产 ID。 */
+    private ModelingDraftPayload incrementalPayload(String modelAlias, String regressionQuestion) {
+        ModelingDraftPayload createPayload = payload(true, List.of(regressionQuestion), List.of());
+        ModelDraft sourceModel = createPayload.getModels().get(0);
+
+        ModelingDraftPayload.AdditionsDraft additions = new ModelingDraftPayload.AdditionsDraft();
+        additions.setMetrics(sourceModel.getMetrics());
+        additions.setSensitiveFields(sourceModel.getSensitiveFields());
+        additions.setAliases(new ArrayList<>(List.of(modelAlias)));
+        additions.setSampleQuestions(new ArrayList<>());
+
+        ModelingDraftPayload.TargetAssetDraft target = new ModelingDraftPayload.TargetAssetDraft();
+        target.setCandidateHandle("candidate_1");
+        target.setAssetType("MODEL");
+        target.setName("订单模型");
+        target.setBaseVersion(1L);
+        target.setBaseTable("orders");
+
+        ModelingDraftPayload payload = new ModelingDraftPayload();
+        payload.setSchemaVersion(ModelingDraftConstants.SCHEMA_VERSION_ROUTED);
+        payload.setAction(ModelingDraftConstants.ACTION_EXTEND_EXISTING);
+        payload.setBusinessGoal("增强订单金额分析");
+        payload.setTargetAsset(target);
+        payload.setAdditions(additions);
+        payload.setModels(new ArrayList<>());
+        payload.setTerms(new ArrayList<>());
+        payload.setModifications(new ArrayList<>());
+        payload.setRegressionQuestions(new ArrayList<>(List.of(regressionQuestion)));
+        payload.setUncertainties(new ArrayList<>());
         return payload;
     }
 

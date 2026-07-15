@@ -1,3 +1,9 @@
+/**
+ * 语义模型管理请求服务。
+ *
+ * 职责：集中封装语义资产、数据库执行和模型编译校验请求；组件不得直接调用 axios。
+ * 并发说明：校验接口支持 AbortSignal，由调用组件取消卸载或内容变化后的旧请求。
+ */
 import request from 'umi-request';
 import moment from 'moment';
 import { DateRangeType } from '@/components/MDatePicker/type';
@@ -371,6 +377,99 @@ type ExcuteSqlParams = {
 export async function executeSql(params: ExcuteSqlParams) {
   const data = { ...params };
   return request.post(`${process.env.API_BASE_URL}database/executeSql`, { data });
+}
+
+export type SemanticDiagnostic = {
+  code?: string;
+  stage?: string;
+  severity?: string;
+  modelId?: number;
+  modelName?: string;
+  dataSetId?: number;
+  engineType?: string;
+  line?: number;
+  column?: number;
+  token?: string;
+  userMessage?: string;
+  developerMessage?: string;
+  suggestion?: string;
+  traceId?: string;
+};
+
+export type SemanticValidationCheck = {
+  type: 'SOURCE_DATABASE' | 'SEMANTIC_COMPILER' | 'FIELD_EXPRESSION' | 'SEMANTIC_QUERY_SMOKE';
+  status: 'PASSED' | 'BLOCKING' | 'WARNING' | 'SKIPPED';
+  message?: string;
+  diagnostic?: SemanticDiagnostic;
+};
+
+export type SemanticValidationResult = {
+  overallStatus: 'PASSED' | 'BLOCKING' | 'WARNING' | 'SKIPPED';
+  checks: SemanticValidationCheck[];
+  contentDigest?: string;
+  traceId?: string;
+};
+
+export type ModelHealth = {
+  modelId: number;
+  compileStatus: 'PASSED' | 'BLOCKING' | 'WARNING' | 'SKIPPED';
+  lastValidatedAt?: number;
+  contentDigest?: string;
+  schemaCacheStatus: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
+  dictionaryStatus: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
+  embeddingStatus: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
+  lastErrorCode?: string;
+  lastTraceId?: string;
+  message?: string;
+};
+
+/**
+ * 调用服务端模型编译校验。
+ *
+ * @param data SQL、数据源、模型上下文和是否执行远程数据源检查。
+ * @param signal 用于取消过期请求的 AbortSignal。
+ * @returns 统一响应，其中 data 为各独立校验项。
+ * @throws 网络中断或请求被取消时由 umi-request 抛出。
+ */
+export function validateModelSql(
+  data: {
+    databaseId: number;
+    modelId?: number;
+    modelName?: string;
+    dataSetId?: number;
+    sql: string;
+    sqlVariables: IDataSource.ISqlParamsItem[];
+    executeSource: boolean;
+  },
+  signal?: AbortSignal,
+): Promise<any> {
+  return request(`${process.env.API_BASE_URL}model/validateSql`, {
+    method: 'POST',
+    data,
+    signal,
+  });
+}
+
+/**
+ * 获取已保存模型的最小健康摘要。
+ *
+ * @param modelId 模型 ID。
+ * @returns 统一响应，其中 data 不包含原始 SQL 或异常堆栈。
+ * @throws 网络失败或无管理权限时由请求层抛出。
+ */
+export function getModelHealth(modelId: number): Promise<any> {
+  return request.get(`${process.env.API_BASE_URL}model/${modelId}/health`);
+}
+
+/**
+ * 触发已保存模型重新编译校验，不修改模型内容。
+ *
+ * @param modelId 模型 ID。
+ * @returns 统一响应，其中 data 为最新校验报告。
+ * @throws 网络失败、无管理权限或模型无 SQL 时由请求层抛出。
+ */
+export function revalidateModel(modelId: number): Promise<any> {
+  return request.post(`${process.env.API_BASE_URL}model/${modelId}/revalidate`);
 }
 
 export function getCatalogs(dbId: number): Promise<any> {

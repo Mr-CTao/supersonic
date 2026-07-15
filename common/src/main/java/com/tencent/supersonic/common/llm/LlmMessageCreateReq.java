@@ -17,6 +17,12 @@ public class LlmMessageCreateReq {
     /** 用户消息内容。 */
     private String content;
 
+    /**
+     * 是否把用户消息原文保存到通用消息表。路由等高敏建模调用可设为 false；Gateway 仍把本次原文
+     * 发送给 Provider，但数据库只保存长度和 SHA-256 审计摘要。
+     */
+    private Boolean persistUserContent = true;
+
     /** text 或 json。 */
     private String responseFormat = LlmConstants.FORMAT_TEXT;
 

@@ -33,6 +33,7 @@ import ModelObjectEditor from './editor/ModelObjectEditor';
 import TermListEditor from './editor/TermListEditor';
 import UncertaintyListEditor from './editor/UncertaintyListEditor';
 import { useStableEditorRowKeys } from './editor/useStableEditorRowKeys';
+import IncrementalDraftEditor from './IncrementalDraftEditor';
 
 type Props = {
   value: SemanticModelingDraftJson;
@@ -64,6 +65,9 @@ function createModel(): SemanticModelDraftModel {
  */
 const DraftObjectEditor: React.FC<Props> = ({ value, onChange }) => {
   const modelRowKeys = useStableEditorRowKeys(value.models?.length || 0, 'model-row');
+  if (value.action === 'EXTEND_EXISTING') {
+    return <IncrementalDraftEditor value={value} onChange={onChange} />;
+  }
   /** 合并草稿顶层字段。 */
   const update = (patch: Partial<SemanticModelingDraftJson>) => {
     onChange({ ...value, ...patch });

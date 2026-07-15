@@ -18,6 +18,7 @@ import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftRev
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftRevisionStore.CompletionDisposition;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftRevisionStore.CompletionResult;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftValidator.ValidatedDraft;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -61,6 +62,7 @@ class ModelingDraftStage4ServiceTest {
     private SemanticModelingDraftVersionMapper versionMapper;
     private ModelingDraftContextBuilder contextBuilder;
     private ModelingDraftValidator validator;
+    private SemanticAssetRoutingService routingService;
     private LlmConversationGatewayService gatewayService;
     private SemanticModelingValidationReportMapper reportMapper;
     private ModelingDraftStage4Service service;
@@ -77,16 +79,18 @@ class ModelingDraftStage4ServiceTest {
         reportMapper = mock(SemanticModelingValidationReportMapper.class);
         contextBuilder = mock(ModelingDraftContextBuilder.class);
         validator = mock(ModelingDraftValidator.class);
+        routingService = mock(SemanticAssetRoutingService.class);
         ModelingDraftValidationEngine validationEngine = mock(ModelingDraftValidationEngine.class);
+        ModelingDraftRouteGuard routeGuard = mock(ModelingDraftRouteGuard.class);
         gatewayService = mock(LlmConversationGatewayService.class);
         objectMapper = new ObjectMapper();
         SemanticModelingProperties properties = new SemanticModelingProperties();
         SemanticModelingSensitivityClassifier classifier =
                 new SemanticModelingSensitivityClassifier();
         service = new ModelingDraftStage4Service(permissionService, store, revisionStore,
-                versionMapper, reportMapper, contextBuilder, validator, validationEngine,
-                new ModelingDraftDiffService(objectMapper, classifier), classifier, gatewayService,
-                properties, objectMapper);
+                versionMapper, reportMapper, contextBuilder, validator, routeGuard, routingService,
+                validationEngine, new ModelingDraftDiffService(objectMapper, classifier),
+                classifier, gatewayService, properties, objectMapper);
         user = User.getDefaultUser();
     }
 
@@ -110,7 +114,7 @@ class ModelingDraftStage4ServiceTest {
                 .thenReturn(new ClaimResult(ClaimDisposition.CLAIMED, attempt));
         when(contextBuilder.reloadValidationContext(eq(3L), eq(null), eq("demo"), any(), eq(null),
                 eq(user))).thenReturn(new ValidationContext(Map.of(), Set.of()));
-        when(validator.getJsonSchema()).thenReturn(objectMapper.createObjectNode());
+        when(validator.getJsonSchema(any())).thenReturn(objectMapper.createObjectNode());
         when(gatewayService.appendMessageAndChatWithoutTransaction(eq(9L), any())).thenReturn(
                 LlmMessageCreateResp.builder().parsedJson(objectMapper.readTree(after)).build());
         when(validator.validateAndNormalize(eq(after), any(), any()))
@@ -185,7 +189,7 @@ class ModelingDraftStage4ServiceTest {
                 .thenReturn(new ClaimResult(ClaimDisposition.CLAIMED, attempt));
         when(contextBuilder.reloadValidationContext(eq(3L), eq(null), eq("demo"), any(), eq(null),
                 eq(user))).thenReturn(new ValidationContext(Map.of(), Set.of()));
-        when(validator.getJsonSchema()).thenReturn(objectMapper.createObjectNode());
+        when(validator.getJsonSchema(any())).thenReturn(objectMapper.createObjectNode());
         Pattern tokenPattern = Pattern.compile("__S2_PROTECTED_[A-Za-z0-9_]+__");
         when(gatewayService.appendMessageAndChatWithoutTransaction(eq(9L), any()))
                 .thenAnswer(invocation -> {

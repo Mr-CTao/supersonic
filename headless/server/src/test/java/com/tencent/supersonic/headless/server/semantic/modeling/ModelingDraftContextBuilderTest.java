@@ -355,6 +355,28 @@ class ModelingDraftContextBuilderTest {
         verifyNoInteractions(gatewayService);
     }
 
+    /** 路由草稿必须使用 2.0 增量契约，不能被历史 models/terms 完整草稿提示误导。 */
+    @Test
+    void shouldUseRoutedVersionTwoOutputContract() {
+        ModelingDraftGenerateReq request = newGenerateRequest();
+        request.setRouteAnalysisId(41L);
+        request.setRouteAction(ModelingDraftConstants.ACTION_EXTEND_EXISTING);
+        request.setRouteContext(Map.of("routeSummary", Map.of("routeAnalysisId", 41L),
+                "targetAsset", Map.of("candidateHandle", "candidate_1", "baseVersion", 7L)));
+        PreflightSnapshot snapshot = new PreflightSnapshot(request, Map.of(TABLE, columns()),
+                Set.of(), Map.of(), Map.of(), 32_000);
+
+        GenerationContext context = contextBuilder.build(snapshot, user);
+
+        assertTrue(context.userPrompt().contains("schemaVersion 固定为 2.0"));
+        assertTrue(context.userPrompt().contains("EXTEND_EXISTING 只能使用 targetAsset/additions"));
+        assertFalse(context.userPrompt().contains("schemaVersion 固定为 1.0"));
+        assertFalse(context.userPrompt().contains("targetDomainId"));
+        assertFalse(context.userPrompt().contains("\"dataSource\":{\"id\""));
+        assertEquals("2.0", context.jsonSchema().path("properties").path("schemaVersion")
+                .path("const").asText());
+    }
+
     /** 确认维度和指标批量查询仅限定当前用户可管理的模型 ID。 */
     private boolean isAuthorizedModelFilter(MetaFilter filter) {
         return filter != null && List.of(21L).equals(filter.getModelIds());

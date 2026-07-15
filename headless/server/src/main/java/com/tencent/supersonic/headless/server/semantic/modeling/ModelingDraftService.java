@@ -8,7 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.headless.api.pojo.response.DatabaseResp;
+import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticModelingDraftAttemptDO;
 import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticModelingDraftDO;
 import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticModelingDraftVersionDO;
@@ -20,6 +22,13 @@ import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftCon
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftStore.CreateResult;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftStore.RegenerationResult;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftValidator.ValidatedDraft;
+import com.tencent.supersonic.headless.server.semantic.routing.ConfirmedSemanticAssetRoute;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetCandidate;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRouteAction;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingException;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingPermissionService;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingService;
+import com.tencent.supersonic.headless.server.service.ModelService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskRejectedException;
@@ -66,6 +75,10 @@ public class ModelingDraftService {
     private final com.tencent.supersonic.headless.server.service.DatabaseService databaseService;
     private final ModelingDraftStage4PermissionService writePermissionService;
     private final ModelingDraftValidator validator;
+    private final ModelingDraftRouteGuard routeGuard;
+    private final SemanticAssetRoutingService routingService;
+    private final SemanticAssetRoutingPermissionService routingPermissionService;
+    private final ModelService modelService;
     private final SemanticModelingProperties properties;
     private final ThreadPoolTaskExecutor executor;
     private final ObjectMapper objectMapper;
@@ -82,6 +95,10 @@ public class ModelingDraftService {
      * @param databaseService 数据源 ACL 服务。
      * @param writePermissionService 草稿统一写权限服务。
      * @param validator 草稿校验器。
+     * @param routeGuard 已确认路由的人工保存不可漂移校验器。
+     * @param routingService 已确认路由读取与权限/版本复核服务。
+     * @param routingPermissionService 路由目标模型的当前 VIEWER 权限与版本复核服务。
+     * @param modelService 模型 ACL 批量查询服务，用于在数据库分页前过滤不可见增强草稿。
      * @param properties 阶段 3 配置。
      * @param executor 专用有界执行器。
      * @param objectMapper JSON 映射器。
@@ -93,7 +110,11 @@ public class ModelingDraftService {
             SemanticModelingDraftVersionMapper versionMapper,
             com.tencent.supersonic.headless.server.service.DatabaseService databaseService,
             ModelingDraftStage4PermissionService writePermissionService,
-            ModelingDraftValidator validator, SemanticModelingProperties properties,
+            ModelingDraftValidator validator, ModelingDraftRouteGuard routeGuard,
+            SemanticAssetRoutingService routingService,
+            SemanticAssetRoutingPermissionService routingPermissionService,
+            ModelService modelService,
+            SemanticModelingProperties properties,
             @Qualifier("semanticModelingExecutor") ThreadPoolTaskExecutor executor,
             ObjectMapper objectMapper) {
         this.contextBuilder = contextBuilder;
@@ -105,6 +126,10 @@ public class ModelingDraftService {
         this.databaseService = databaseService;
         this.writePermissionService = writePermissionService;
         this.validator = validator;
+        this.routeGuard = routeGuard;
+        this.routingService = routingService;
+        this.routingPermissionService = routingPermissionService;
+        this.modelService = modelService;
         this.properties = properties;
         this.executor = executor;
         this.objectMapper = objectMapper;
@@ -126,14 +151,23 @@ public class ModelingDraftService {
     public ModelingDraftResp create(ModelingDraftGenerateReq request, String idempotencyKey,
             User user) {
         validateIdempotencyKey(idempotencyKey);
+        if (request.getRouteAnalysisId() == null) {
+            throw new ModelingDraftException(HttpStatus.BAD_REQUEST,
+                    ModelingDraftConstants.ERROR_INVALID_REQUEST,
+                    "创建草稿前必须先确认语义资产路由");
+        }
         SemanticModelingDraftDO existing =
                 store.findByIdempotencyKey(user.getName(), idempotencyKey);
         if (existing != null) {
-            verifyDatabaseAccess(existing, user);
-            return toResponse(existing, true);
+            return replayExistingCreation(request, existing, user);
         }
+        ConfirmedSemanticAssetRoute route =
+                routingService.requireConsumableRoute(request.getRouteAnalysisId(), user);
+        applyConfirmedRoute(request, route, false);
         PreflightSnapshot snapshot = contextBuilder.preflight(request, user);
         String requestFingerprint = fingerprint(createFingerprintPayload(snapshot.request()));
+        // 元数据预检可能访问远端数据源；入库前再次校验权限、目标版本与未消费状态，缩短 TOCTOU 窗口。
+        routingService.requireConsumableRoute(request.getRouteAnalysisId(), user);
         CreateResult result;
         try {
             result = store.createGenerating(snapshot.request(), idempotencyKey, requestFingerprint,
@@ -148,8 +182,17 @@ public class ModelingDraftService {
             result = new CreateResult(replay, true);
         }
         if (result.replay()) {
-            // Gap 去重可能复用其他操作者先创建的活动草稿；返回前必须按既有草稿自己的
-            // dataSourceId 重新检查 ACL，不能用本次请求已通过校验的数据源替代。
+            // 数据库唯一键或 Gap 行锁可能让本实例成为并发败者。返回前必须同时复核：路由仍绑定
+            // 该草稿、目标权限/版本未漂移、attempt 1 指纹一致，以及既有草稿数据源仍可访问。
+            if (!Objects.equals(result.draft().getRouteAnalysisId(), request.getRouteAnalysisId())) {
+                throw new ModelingDraftException(HttpStatus.CONFLICT,
+                        ModelingDraftConstants.ERROR_IDEMPOTENCY_CONFLICT,
+                        "Idempotency-Key 已用于不同路由快照的草稿请求");
+            }
+            routingService.requireBoundRoute(request.getRouteAnalysisId(),
+                    result.draft().getId(), user);
+            store.validateCreationReplay(result.draft().getId(), requestFingerprint,
+                    result.draft());
             verifyDatabaseAccess(result.draft(), user);
         }
         if (!result.replay()) {
@@ -165,6 +208,37 @@ public class ModelingDraftService {
             }
         }
         return toResponse(result.draft(), result.replay());
+    }
+
+    /**
+     * 安全重放既有创建结果，并重新执行参数、ACL 和目标版本校验。
+     *
+     * <p>快速重放不能仅比较路由 ID：相同键可能携带不同 LLM、样例开关或范围参数，且增强目标
+     * 可能在首次请求后被撤权或升级。因此先按既有草稿绑定读取确认路由，再用冻结路由重建预检
+     * 快照并核对 attempt 1 指纹；慢速预检后再次检查绑定，避免 TOCTOU。</p>
+     *
+     * @param request 本次创建请求，路由范围会由确认快照覆盖。
+     * @param existing 幂等键命中的既有草稿。
+     * @param user 当前用户。
+     * @return 原草稿的幂等重放响应。
+     * @throws ModelingDraftException 路由、权限、版本或请求指纹不一致时抛出冲突。
+     */
+    private ModelingDraftResp replayExistingCreation(ModelingDraftGenerateReq request,
+            SemanticModelingDraftDO existing, User user) {
+        if (!Objects.equals(existing.getRouteAnalysisId(), request.getRouteAnalysisId())) {
+            throw new ModelingDraftException(HttpStatus.CONFLICT,
+                    ModelingDraftConstants.ERROR_IDEMPOTENCY_CONFLICT,
+                    "Idempotency-Key 已用于不同路由快照的草稿请求");
+        }
+        ConfirmedSemanticAssetRoute route = routingService.requireBoundRoute(
+                existing.getRouteAnalysisId(), existing.getId(), user);
+        applyConfirmedRoute(request, route, false);
+        PreflightSnapshot snapshot = contextBuilder.preflight(request, user);
+        String requestFingerprint = fingerprint(createFingerprintPayload(snapshot.request()));
+        routingService.requireBoundRoute(existing.getRouteAnalysisId(), existing.getId(), user);
+        store.validateCreationReplay(existing.getId(), requestFingerprint, existing);
+        verifyDatabaseAccess(existing, user);
+        return toResponse(existing, true);
     }
 
     /**
@@ -196,7 +270,16 @@ public class ModelingDraftService {
 
         // 重建创建请求以复用完全相同的 ACL、模型能力、Gap 和服务端真实表字段预检。
         ModelingDraftGenerateReq generationRequest = toRegenerationGenerateReq(draft, request);
+        if (draft.getRouteAnalysisId() != null) {
+            ConfirmedSemanticAssetRoute route = routingService.requireBoundRoute(
+                    draft.getRouteAnalysisId(), draft.getId(), user);
+            applyConfirmedRoute(generationRequest, route, true);
+        }
         PreflightSnapshot snapshot = contextBuilder.preflight(generationRequest, user);
+        if (draft.getRouteAnalysisId() != null) {
+            // 重新生成入队前再次校验，防止慢速预检期间目标资产被更新或权限被撤销。
+            routingService.requireBoundRoute(draft.getRouteAnalysisId(), draft.getId(), user);
+        }
         RegenerationResult result;
         try {
             result = store.regenerate(draft, request.getLockVersion(), request.getChatModelId(),
@@ -241,10 +324,15 @@ public class ModelingDraftService {
             return emptyPage(request.getPage(), request.getPageSize());
         }
 
+        // 一次性加载当前账号可读取的模型 ID，并把过滤条件下推到分页 SQL。这样既不会在草稿循环中
+        // 产生 N+1 ACL 查询，也不会把已撤权/删除目标对应的草稿数量暴露在分页 total 中。
+        Set<Long> readableModelIds = loadReadableModelIds(user);
+
         LambdaQueryWrapper<SemanticModelingDraftDO> wrapper =
                 new LambdaQueryWrapper<SemanticModelingDraftDO>()
                         .in(SemanticModelingDraftDO::getDataSourceId, accessibleDatabaseIds)
                         .orderByDesc(SemanticModelingDraftDO::getId);
+        applyRouteTargetAclFilter(wrapper, readableModelIds);
         if (StringUtils.isNotBlank(request.getSourceType())) {
             wrapper.eq(SemanticModelingDraftDO::getSourceType,
                     request.getSourceType().trim().toUpperCase(Locale.ROOT));
@@ -268,6 +356,8 @@ public class ModelingDraftService {
         // 其他用户进入详情后由 canManage 精确判定并开放重生成等写入口。
         Boolean listManageCapability = user.isSuperAdmin() ? Boolean.TRUE : null;
         return mapPage(page, page.getList().stream()
+                // Mapper 单测不会执行 Lambda 条件；这里保留同语义的纵深防御，不额外访问数据库。
+                .filter(item -> isRouteTargetReadable(item, readableModelIds))
                 .map(item -> toResponse(item, false, false, listManageCapability)).toList());
     }
 
@@ -281,6 +371,7 @@ public class ModelingDraftService {
     public ModelingDraftResp get(Long id, User user) {
         recoverStaleGenerations();
         SemanticModelingDraftDO draft = requireAccessible(id, user);
+        requireRouteTargetReadable(draft, user);
         return toResponse(draft, false, true, writePermissionService.canManage(draft, user));
     }
 
@@ -299,6 +390,9 @@ public class ModelingDraftService {
             throw new ModelingDraftException(HttpStatus.CONFLICT,
                     ModelingDraftConstants.ERROR_CONFLICT, "只有生成成功的 DRAFT 状态可以保存");
         }
+        if (draft.getRouteAnalysisId() != null) {
+            routingService.requireBoundRoute(draft.getRouteAnalysisId(), draft.getId(), user);
+        }
         String json = resolveSaveJson(request);
         List<String> selectedTables = readSelectedTables(draft.getSelectedTables());
         ValidationContext context = contextBuilder.reloadValidationContext(draft.getDataSourceId(),
@@ -306,6 +400,7 @@ public class ModelingDraftService {
                 draft.getDomainId(), user);
         ValidatedDraft validated = validator.validateAndNormalize(json, context.columnsByTable(),
                 context.existingNames());
+        routeGuard.validateMutation(draft, draft.getDraftJson(), validated.payload());
         SemanticModelingDraftDO saved = store.saveVersion(draft, request.getLockVersion(),
                 validated.json(), request.getChangeSummary(), user);
         // 本请求已由 requireManageable 完成服务端授权，保存不会改变数据源/主题域绑定；响应必须保留
@@ -444,13 +539,71 @@ public class ModelingDraftService {
         generation.setSelectedTables(readSelectedTables(draft.getSelectedTables()));
         generation.setChatModelId(request.getChatModelId());
         generation.setIncludeSampleData(Boolean.TRUE.equals(request.getIncludeSampleData()));
+        generation.setRouteAnalysisId(draft.getRouteAnalysisId());
         return generation;
+    }
+
+    /**
+     * 校验客户端范围与确认路由完全一致，并用服务端快照填充不可伪造字段。
+     *
+     * <p>路由是草稿创建的授权事实源。首次创建时 LLM 与样例开关也必须匹配分析快照；人工重试只
+     * 允许覆盖这两个生成选项，因为它们不会改变已确认的业务范围、候选目标和口径答案。其余范围
+     * 任一变化都要求重新分析，不能在草稿接口中偷偷替换。</p>
+     */
+    private void applyConfirmedRoute(ModelingDraftGenerateReq request,
+            ConfirmedSemanticAssetRoute route, boolean allowGenerationOptionOverride) {
+        List<String> requestTables = normalizeTables(request.getSelectedTables());
+        List<String> routeTables = normalizeTables(route.getSelectedTables());
+        boolean matches = Objects.equals(StringUtils.upperCase(request.getSourceType()),
+                route.getSourceType())
+                && Objects.equals(request.getSourceId(), route.getSourceId())
+                && Objects.equals(StringUtils.trim(request.getBusinessGoal()),
+                        route.getBusinessGoal())
+                && Objects.equals(request.getDomainId(), route.getDomainId())
+                && Objects.equals(request.getDataSourceId(), route.getDataSourceId())
+                && Objects.equals(StringUtils.trimToNull(request.getCatalogName()),
+                        StringUtils.trimToNull(route.getCatalogName()))
+                && Objects.equals(StringUtils.trimToNull(request.getDatabaseName()),
+                        StringUtils.trimToNull(route.getDatabaseName()))
+                && Objects.equals(requestTables, routeTables)
+                && (allowGenerationOptionOverride
+                        || (Objects.equals(request.getChatModelId(), route.getChatModelId())
+                                && Objects.equals(
+                                        Boolean.TRUE.equals(request.getIncludeSampleData()),
+                                        Boolean.TRUE.equals(route.getIncludeSampleData()))));
+        if (!matches) {
+            throw new ModelingDraftException(HttpStatus.CONFLICT,
+                    ModelingDraftConstants.ERROR_CONFLICT,
+                    "草稿范围与已确认路由快照不一致，请重新分析");
+        }
+        request.setSourceType(route.getSourceType());
+        request.setSourceId(route.getSourceId());
+        request.setBusinessGoal(route.getBusinessGoal());
+        request.setDomainId(route.getDomainId());
+        request.setDataSourceId(route.getDataSourceId());
+        request.setCatalogName(route.getCatalogName());
+        request.setDatabaseName(route.getDatabaseName());
+        request.setSelectedTables(routeTables);
+        request.setRouteAction(route.getAction().name());
+        request.setRouteContext(new LinkedHashMap<>(route.getPromptContext()));
+        request.setRouteTargetAssetType(route.getTargetAssetType());
+        request.setRouteTargetAssetId(route.getTargetAssetId());
+        request.setRouteTargetAssetVersion(route.getTargetAssetVersion());
+    }
+
+    /** 规范化选表顺序，使路由指纹和草稿范围不受 UI 选择顺序影响。 */
+    private List<String> normalizeTables(List<String> tables) {
+        return Objects.requireNonNullElse(tables, List.<String>of()).stream().map(StringUtils::trim)
+                .filter(StringUtils::isNotBlank).distinct().sorted().toList();
     }
 
     /** 构造首次创建 attempt 的稳定指纹载荷。 */
     private Object createFingerprintPayload(ModelingDraftGenerateReq request) {
         LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
         payload.put("operation", "CREATE");
+        payload.put("routeAnalysisId", request.getRouteAnalysisId());
+        payload.put("routeAction", request.getRouteAction());
+        payload.put("routeTargetAssetVersion", request.getRouteTargetAssetVersion());
         payload.put("sourceType", request.getSourceType());
         payload.put("sourceId", request.getSourceId());
         payload.put("businessGoal", request.getBusinessGoal());
@@ -521,6 +674,86 @@ public class ModelingDraftService {
         }
     }
 
+    /**
+     * 一次性读取当前用户拥有 VIEWER 权限的全部模型 ID。
+     *
+     * <p>传入空主题域沿用现有模型权限服务的“全部可见主题域”语义。该集合只在当前请求内使用，
+     * 不做单例缓存，避免撤权后继续命中陈旧权限。</p>
+     */
+    private Set<Long> loadReadableModelIds(User user) {
+        List<ModelResp> readableModels = modelService.getModelListWithAuth(user, null,
+                AuthType.VIEWER);
+        if (readableModels == null || readableModels.isEmpty()) {
+            return Set.of();
+        }
+        return readableModels.stream().filter(Objects::nonNull).map(ModelResp::getId)
+                .filter(Objects::nonNull).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    /** 将增强草稿的目标模型 ACL 下推到分页 SQL，避免 total 泄露不可见目标的草稿数量。 */
+    void applyRouteTargetAclFilter(LambdaQueryWrapper<SemanticModelingDraftDO> wrapper,
+            Set<Long> readableModelIds) {
+        wrapper.and(nested -> {
+            // 历史草稿和 CREATE_NEW 等动作不依赖正式目标模型，必须保持原有可见性。
+            nested.isNull(SemanticModelingDraftDO::getRouteAction).or()
+                    .ne(SemanticModelingDraftDO::getRouteAction,
+                            SemanticAssetRouteAction.EXTEND_EXISTING.name());
+            if (!readableModelIds.isEmpty()) {
+                nested.or().in(SemanticModelingDraftDO::getRouteTargetAssetId,
+                        readableModelIds);
+            }
+        });
+    }
+
+    /** 判断单条草稿是否仍满足与分页 SQL 相同的目标模型可见性规则。 */
+    boolean isRouteTargetReadable(SemanticModelingDraftDO draft,
+            Set<Long> readableModelIds) {
+        if (!SemanticAssetRouteAction.EXTEND_EXISTING.name().equals(draft.getRouteAction())) {
+            return true;
+        }
+        return draft.getRouteTargetAssetId() != null
+                && readableModelIds.contains(draft.getRouteTargetAssetId());
+    }
+
+    /**
+     * 详情读取时复核增强目标的当前 VIEWER 权限、存在性与基线版本。
+     *
+     * <p>权限服务对撤权、删除和未知目标统一返回安全不可用，服务层不会把正式模型 ID、名称或
+     * ACL 判断差异写入响应。版本漂移继续沿用路由层的明确冲突语义。</p>
+     */
+    private void requireRouteTargetReadable(SemanticModelingDraftDO draft, User user) {
+        if (!SemanticAssetRouteAction.EXTEND_EXISTING.name().equals(draft.getRouteAction())) {
+            return;
+        }
+        if (draft.getRouteTargetAssetId() == null || draft.getRouteTargetAssetVersion() == null
+                || draft.getDomainId() == null) {
+            throw routeTargetUnavailable();
+        }
+        SemanticAssetCandidate target = SemanticAssetCandidate.builder()
+                .candidateHandle("confirmed_route_target")
+                .assetType(draft.getRouteTargetAssetType())
+                .assetId(draft.getRouteTargetAssetId())
+                .assetVersion(draft.getRouteTargetAssetVersion())
+                .domainId(draft.getDomainId())
+                .dataSourceId(draft.getDataSourceId())
+                .build();
+        try {
+            routingPermissionService.requireReadableCandidateVersion(target, user);
+        } catch (SemanticAssetRoutingException exception) {
+            if (exception.getStatusCode().value() == HttpStatus.NOT_FOUND.value()) {
+                // 不透传底层关于删除或撤权的差异信息，统一表现为草稿不可访问。
+                throw routeTargetUnavailable();
+            }
+            throw exception;
+        }
+    }
+
+    /** 创建不区分目标删除、撤权或损坏快照的安全不可用异常。 */
+    private ModelingDraftException routeTargetUnavailable() {
+        return new ModelingDraftException(HttpStatus.NOT_FOUND,
+                ModelingDraftConstants.ERROR_NOT_FOUND, "语义建模草稿不存在或不可访问");
+    }
+
     /** 解析人工保存 JSON 的两个兼容字段。 */
     private String resolveSaveJson(ModelingDraftSaveReq request) {
         if (request.getCurrentDraft() != null && !request.getCurrentDraft().isNull()) {
@@ -571,6 +804,9 @@ public class ModelingDraftService {
                 .databaseName(draft.getDatabaseName())
                 .selectedTables(readSelectedTables(draft.getSelectedTables()))
                 .chatModelId(draft.getChatModelId()).includeSampleData(draft.getIncludeSample())
+                .routeAnalysisId(draft.getRouteAnalysisId()).routeAction(draft.getRouteAction())
+                .routeTargetAssetType(draft.getRouteTargetAssetType())
+                .routeTargetAssetVersion(draft.getRouteTargetAssetVersion())
                 .status(draft.getStatus()).currentVersionNo(draft.getCurrentVersionNo())
                 .currentVersion(draft.getCurrentVersionNo()).lockVersion(draft.getLockVersion())
                 .currentAttemptNo(currentAttemptNo).manualRegenerationCount(manualRegenerationCount)

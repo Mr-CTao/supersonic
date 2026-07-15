@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "2.0",
+  "action": "EXTEND_EXISTING",
+  "routeSummary": {
+    "routeAnalysisId": 1,
+    "decisionSource": "RULE_AND_LLM",
+    "explanation": "现有资产覆盖主体和大部分维度，仅需补充派生能力",
+    "coveredCapabilities": ["物料编码", "物料名称", "批次"],
+    "missingCapabilities": ["呆滞基准日期", "呆滞时长"],
+    "queryOperations": ["ORDER_DESC", "TOP_N"],
+    "businessAnswers": {"date_basis": "EARLIEST_DATE"}
+  },
+  "businessGoal": "按派生时长排序并查看前十条记录",
+  "targetDomain": null,
+  "models": [],
+  "terms": [],
+  "targetAsset": {
+    "candidateHandle": "candidate_1",
+    "assetType": "MODEL",
+    "name": "库存汇总",
+    "baseVersion": 7,
+    "baseTable": "stock_summary"
+  },
+  "additions": {
+    "dimensions": [
+      {
+        "key": "sluggishDuration",
+        "name": "呆滞时长",
+        "bizName": "sluggish_duration_days",
+        "field": "sluggish_duration_days",
+        "derivation": {
+          "operator": "DATE_DIFF",
+          "startField": "inbound_date",
+          "endType": "CURRENT_DATE",
+          "endField": null,
+          "unit": "DAY"
+        },
+        "description": "按已确认的入库日期口径计算至当前日期的天数",
+        "semanticType": "NUMBER",
+        "aliases": []
+      }
+    ],
+    "metrics": [],
+    "terms": [],
+    "sensitiveFields": [],
+    "aliases": [],
+    "sampleQuestions": ["按派生时长查看前十条记录"]
+  },
+  "modifications": [],
+  "regressionQuestions": ["按派生时长查看前十条记录"],
+  "uncertainties": []
+}

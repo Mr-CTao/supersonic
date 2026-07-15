@@ -11,12 +11,7 @@
  * - 搜索筛选由 ProTable 表单提交触发，不监听输入逐字请求，因此无需额外 debounce；
  * - 页面不维护跨标签页共享状态，最终一致性以后端查询结果为准。
  */
-import {
-  EyeOutlined,
-  RobotOutlined,
-  StopOutlined,
-  UndoOutlined,
-} from '@ant-design/icons';
+import { EyeOutlined, RobotOutlined, StopOutlined, UndoOutlined } from '@ant-design/icons';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
 import { history } from '@umijs/max';
@@ -61,6 +56,9 @@ const FAILURE_TYPE_TEXT: Record<SemanticGapFailureType, string> = {
   EMPTY_RESULT_SUSPECTED: '结果疑似异常为空',
   USER_NEGATIVE_FEEDBACK: '用户负反馈',
   FALLBACK_TO_LLM_SQL: '回退LLM SQL',
+  BUSINESS_DEFINITION_UNCERTAIN: '业务口径待确认',
+  SEMANTIC_ASSET_MISSING: '语义资产缺失',
+  TECHNICAL_VALIDATION_FAILED: '技术校验失败',
   UNKNOWN: '未知',
 };
 
@@ -116,7 +114,12 @@ const getRequestErrorText = (error: any) => {
  * @throws 不抛出异常。
  */
 const renderFailureType = (value?: SemanticGapFailureType) => {
-  const color = value === 'NO_SELECTED_PARSE' || value === 'PARSER_EXCEPTION' ? 'red' : 'blue';
+  const color =
+    value === 'NO_SELECTED_PARSE' ||
+    value === 'PARSER_EXCEPTION' ||
+    value === 'TECHNICAL_VALIDATION_FAILED'
+      ? 'red'
+      : 'blue';
   return <Tag color={color}>{value ? FAILURE_TYPE_TEXT[value] : '-'}</Tag>;
 };
 
@@ -128,7 +131,9 @@ const renderFailureType = (value?: SemanticGapFailureType) => {
  * @throws 不抛出异常。
  */
 const renderStatus = (value?: SemanticGapStatus) => {
-  return <Tag color={value ? STATUS_COLOR[value] : 'default'}>{value ? STATUS_TEXT[value] : '-'}</Tag>;
+  return (
+    <Tag color={value ? STATUS_COLOR[value] : 'default'}>{value ? STATUS_TEXT[value] : '-'}</Tag>
+  );
 };
 
 /**
@@ -142,7 +147,11 @@ const renderParagraph = (value?: string) => {
   if (!value) {
     return <Text type="secondary">-</Text>;
   }
-  return <Paragraph copyable={{ text: value }} style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>{value}</Paragraph>;
+  return (
+    <Paragraph copyable={{ text: value }} style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+      {value}
+    </Paragraph>
+  );
 };
 
 /**
@@ -267,166 +276,167 @@ const SemanticGapPool: React.FC = () => {
     history.push(`/ai-semantic-modeling/drafts?gapId=${encodeURIComponent(record.id)}`);
   };
 
-  const columns: ProColumns<SemanticGapItem>[] = useMemo(() => [
-    {
-      title: '序号',
-      dataIndex: 'index',
-      search: false,
-      width: 72,
-      fixed: 'left',
-      align: 'center',
-      render: (_, __, index) => (
-        (pageInfo.current - 1) * pageInfo.pageSize + index + 1
-      ),
-    },
-    {
-      title: '关键词',
-      dataIndex: 'keyword',
-      hideInTable: true,
-      align: 'center',
-      fieldProps: {
-        placeholder: '问题、原因、反馈',
+  const columns: ProColumns<SemanticGapItem>[] = useMemo(
+    () => [
+      {
+        title: '序号',
+        dataIndex: 'index',
+        search: false,
+        width: 72,
+        fixed: 'left',
+        align: 'center',
+        render: (_, __, index) => (pageInfo.current - 1) * pageInfo.pageSize + index + 1,
       },
-    },
-    {
-      title: '助手',
-      dataIndex: 'assistantId',
-      valueType: 'digit',
-      hideInTable: true,
-      align: 'center',
-    },
-    {
-      title: '主题域',
-      dataIndex: 'domainId',
-      valueType: 'digit',
-      hideInTable: true,
-      align: 'center',
-    },
-    {
-      title: '数据源',
-      dataIndex: 'dataSourceId',
-      valueType: 'digit',
-      hideInTable: true,
-      align: 'center',
-    },
-    {
-      title: '失败类型',
-      dataIndex: 'failureType',
-      valueType: 'select',
-      align: 'center',
-      valueEnum: Object.fromEntries(
-        Object.entries(FAILURE_TYPE_TEXT).map(([key, text]) => [key, { text }]),
-      ),
-      render: (_, record) => renderFailureType(record.failureType),
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      valueType: 'select',
-      align: 'center',
-      valueEnum: Object.fromEntries(
-        Object.entries(STATUS_TEXT).map(([key, text]) => [key, { text }]),
-      ),
-      render: (_, record) => renderStatus(record.status),
-    },
-    {
-      title: '最近出现',
-      dataIndex: 'lastSeenAt',
-      valueType: 'dateRange',
-      align: 'center',
-      search: {
-        transform: (value: string[]) => ({
-          startTime: value?.[0],
-          endTime: value?.[1],
-        }),
+      {
+        title: '关键词',
+        dataIndex: 'keyword',
+        hideInTable: true,
+        align: 'center',
+        fieldProps: {
+          placeholder: '问题、原因、反馈',
+        },
       },
-      render: (_, record) => formatLocalDateTime(record.lastSeenAt),
-    },
-    {
-      title: '问题',
-      dataIndex: 'question',
-      search: false,
-      ellipsis: true,
-      width: 320,
-      align: 'center',
-    },
-    {
-      title: '出现',
-      dataIndex: 'occurrenceCount',
-      search: false,
-      width: 72,
-      align: 'center',
-    },
-    {
-      title: '负反馈',
-      dataIndex: 'negativeFeedbackCount',
-      search: false,
-      width: 82,
-      align: 'center',
-    },
-    {
-      title: '优先级',
-      dataIndex: 'priorityScore',
-      search: false,
-      width: 82,
-      sorter: false,
-      align: 'center',
-    },
-    {
-      title: '操作',
-      dataIndex: 'option',
-      valueType: 'option',
-      width: 160,
-      fixed: 'right',
-      align: 'center',
-      render: (_, record) => (
-        <Space size={4} style={{ whiteSpace: 'nowrap' }}>
-          <Tooltip title="查看详情">
-            <Button
-              aria-label="查看详情"
-              icon={<EyeOutlined />}
-              size="small"
-              title="查看详情"
-              onClick={() => openDetail(record)}
-            />
-          </Tooltip>
-          <Tooltip title="发起AI建模">
-            <Button
-              aria-label="发起AI建模"
-              icon={<RobotOutlined />}
-              loading={actionLoadingId === record.id}
-              size="small"
-              title="发起AI建模"
-              onClick={() => startDraft(record)}
-            />
-          </Tooltip>
-          {record.status === 'IGNORED' ? (
-            <Tooltip title="重新打开">
+      {
+        title: '助手',
+        dataIndex: 'assistantId',
+        valueType: 'digit',
+        hideInTable: true,
+        align: 'center',
+      },
+      {
+        title: '主题域',
+        dataIndex: 'domainId',
+        valueType: 'digit',
+        hideInTable: true,
+        align: 'center',
+      },
+      {
+        title: '数据源',
+        dataIndex: 'dataSourceId',
+        valueType: 'digit',
+        hideInTable: true,
+        align: 'center',
+      },
+      {
+        title: '失败类型',
+        dataIndex: 'failureType',
+        valueType: 'select',
+        align: 'center',
+        valueEnum: Object.fromEntries(
+          Object.entries(FAILURE_TYPE_TEXT).map(([key, text]) => [key, { text }]),
+        ),
+        render: (_, record) => renderFailureType(record.failureType),
+      },
+      {
+        title: '状态',
+        dataIndex: 'status',
+        valueType: 'select',
+        align: 'center',
+        valueEnum: Object.fromEntries(
+          Object.entries(STATUS_TEXT).map(([key, text]) => [key, { text }]),
+        ),
+        render: (_, record) => renderStatus(record.status),
+      },
+      {
+        title: '最近出现',
+        dataIndex: 'lastSeenAt',
+        valueType: 'dateRange',
+        align: 'center',
+        search: {
+          transform: (value: string[]) => ({
+            startTime: value?.[0],
+            endTime: value?.[1],
+          }),
+        },
+        render: (_, record) => formatLocalDateTime(record.lastSeenAt),
+      },
+      {
+        title: '问题',
+        dataIndex: 'question',
+        search: false,
+        ellipsis: true,
+        width: 320,
+        align: 'center',
+      },
+      {
+        title: '出现',
+        dataIndex: 'occurrenceCount',
+        search: false,
+        width: 72,
+        align: 'center',
+      },
+      {
+        title: '负反馈',
+        dataIndex: 'negativeFeedbackCount',
+        search: false,
+        width: 82,
+        align: 'center',
+      },
+      {
+        title: '优先级',
+        dataIndex: 'priorityScore',
+        search: false,
+        width: 82,
+        sorter: false,
+        align: 'center',
+      },
+      {
+        title: '操作',
+        dataIndex: 'option',
+        valueType: 'option',
+        width: 160,
+        fixed: 'right',
+        align: 'center',
+        render: (_, record) => (
+          <Space size={4} style={{ whiteSpace: 'nowrap' }}>
+            <Tooltip title="查看详情">
               <Button
-                aria-label="重新打开"
-                icon={<UndoOutlined />}
-                loading={actionLoadingId === record.id}
+                aria-label="查看详情"
+                icon={<EyeOutlined />}
                 size="small"
-                title="重新打开"
-                onClick={() => reopenGap(record)}
+                title="查看详情"
+                onClick={() => openDetail(record)}
               />
             </Tooltip>
-          ) : (
-            <Tooltip title="忽略">
+            <Tooltip title="分析并建模">
               <Button
-                aria-label="忽略"
-                icon={<StopOutlined />}
+                aria-label="分析并建模"
+                icon={<RobotOutlined />}
                 loading={actionLoadingId === record.id}
                 size="small"
-                title="忽略"
-                onClick={() => openIgnoreModal(record)}
+                title="分析并建模"
+                onClick={() => startDraft(record)}
               />
             </Tooltip>
-          )}
-        </Space>
-      ),
-    },
-  ], [actionLoadingId, pageInfo]);
+            {record.status === 'IGNORED' ? (
+              <Tooltip title="重新打开">
+                <Button
+                  aria-label="重新打开"
+                  icon={<UndoOutlined />}
+                  loading={actionLoadingId === record.id}
+                  size="small"
+                  title="重新打开"
+                  onClick={() => reopenGap(record)}
+                />
+              </Tooltip>
+            ) : (
+              <Tooltip title="忽略">
+                <Button
+                  aria-label="忽略"
+                  icon={<StopOutlined />}
+                  loading={actionLoadingId === record.id}
+                  size="small"
+                  title="忽略"
+                  onClick={() => openIgnoreModal(record)}
+                />
+              </Tooltip>
+            )}
+          </Space>
+        ),
+      },
+    ],
+    [actionLoadingId, pageInfo],
+  );
 
   const recentQuestions = currentGap?.recentQuestions
     ? currentGap.recentQuestions.split('\n').filter(Boolean)
@@ -445,8 +455,8 @@ const SemanticGapPool: React.FC = () => {
           };
           setPageInfo((previous) => {
             if (
-              previous.current === nextPageInfo.current
-              && previous.pageSize === nextPageInfo.pageSize
+              previous.current === nextPageInfo.current &&
+              previous.pageSize === nextPageInfo.pageSize
             ) {
               return previous;
             }
@@ -490,26 +500,87 @@ const SemanticGapPool: React.FC = () => {
       >
         <Descriptions bordered column={1} size="small">
           <Descriptions.Item label="状态">{renderStatus(currentGap?.status)}</Descriptions.Item>
-          <Descriptions.Item label="失败类型">{renderFailureType(currentGap?.failureType)}</Descriptions.Item>
-          <Descriptions.Item label="原始问题">{renderParagraph(currentGap?.question)}</Descriptions.Item>
+          <Descriptions.Item label="失败类型">
+            {renderFailureType(currentGap?.failureType)}
+          </Descriptions.Item>
+          <Descriptions.Item label="原始问题">
+            {renderParagraph(currentGap?.question)}
+          </Descriptions.Item>
           <Descriptions.Item label="相似问法">
             {recentQuestions.length > 0
-              ? recentQuestions.map((item) => <Paragraph key={item} style={{ marginBottom: 4 }}>{item}</Paragraph>)
+              ? recentQuestions.map((item) => (
+                  <Paragraph key={item} style={{ marginBottom: 4 }}>
+                    {item}
+                  </Paragraph>
+                ))
               : '-'}
           </Descriptions.Item>
-          <Descriptions.Item label="失败原因">{renderParagraph(currentGap?.failureReason)}</Descriptions.Item>
-          <Descriptions.Item label="用户反馈">{renderParagraph(currentGap?.feedback)}</Descriptions.Item>
-          <Descriptions.Item label="命中模型">{currentGap?.matchedModelIds || '-'}</Descriptions.Item>
-          <Descriptions.Item label="命中指标">{currentGap?.matchedMetricIds || '-'}</Descriptions.Item>
-          <Descriptions.Item label="命中维度">{currentGap?.matchedDimensionIds || '-'}</Descriptions.Item>
-          <Descriptions.Item label="SQL">{renderParagraph(currentGap?.generatedSql)}</Descriptions.Item>
+          <Descriptions.Item label="失败原因">
+            {renderParagraph(currentGap?.failureReason)}
+          </Descriptions.Item>
+          <Descriptions.Item label="失败阶段">
+            {currentGap?.diagnosticStage || '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="错误码">{currentGap?.errorCode || '-'}</Descriptions.Item>
+          <Descriptions.Item label="traceId">{currentGap?.traceId || '-'}</Descriptions.Item>
+          <Descriptions.Item label="校验位置">
+            {currentGap?.errorLine
+              ? `${currentGap.errorLine}:${currentGap.errorColumn || 1} ${
+                  currentGap.errorToken || ''
+                }`
+              : '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="修复建议">
+            {renderParagraph(currentGap?.suggestion)}
+          </Descriptions.Item>
+          <Descriptions.Item label="用户反馈">
+            {renderParagraph(currentGap?.feedback)}
+          </Descriptions.Item>
+          <Descriptions.Item label="命中模型">
+            {currentGap?.matchedModelIds || '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="命中指标">
+            {currentGap?.matchedMetricIds || '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="命中维度">
+            {currentGap?.matchedDimensionIds || '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="SQL">
+            {renderParagraph(currentGap?.generatedSql)}
+          </Descriptions.Item>
           <Descriptions.Item label="S2SQL">{renderParagraph(currentGap?.s2sql)}</Descriptions.Item>
-          <Descriptions.Item label="最近出现">{formatLocalDateTime(currentGap?.lastSeenAt)}</Descriptions.Item>
-          <Descriptions.Item label="创建时间">{formatLocalDateTime(currentGap?.createdAt)}</Descriptions.Item>
-          <Descriptions.Item label="更新时间">{formatLocalDateTime(currentGap?.updatedAt)}</Descriptions.Item>
+          <Descriptions.Item label="最近出现">
+            {formatLocalDateTime(currentGap?.lastSeenAt)}
+          </Descriptions.Item>
+          <Descriptions.Item label="创建时间">
+            {formatLocalDateTime(currentGap?.createdAt)}
+          </Descriptions.Item>
+          <Descriptions.Item label="更新时间">
+            {formatLocalDateTime(currentGap?.updatedAt)}
+          </Descriptions.Item>
           <Descriptions.Item label="来源问答">{currentGap?.sourceQueryId || '-'}</Descriptions.Item>
-          <Descriptions.Item label="忽略原因">{renderParagraph(currentGap?.ignoreReason)}</Descriptions.Item>
+          <Descriptions.Item label="忽略原因">
+            {renderParagraph(currentGap?.ignoreReason)}
+          </Descriptions.Item>
         </Descriptions>
+        {currentGap?.matchedModelIds ? (
+          <Typography.Paragraph style={{ marginTop: 16, marginBottom: 0 }} type="secondary">
+            已命中 {currentGap.matchedModelIds.split(',').filter(Boolean).length}{' '}
+            个现有模型，系统将优先判断是否可以复用或增强。
+          </Typography.Paragraph>
+        ) : null}
+        {currentGap?.domainId && currentGap?.matchedModelIds ? (
+          <Button
+            style={{ marginTop: 16 }}
+            type="primary"
+            onClick={() => {
+              const modelId = currentGap.matchedModelIds?.split(',')[0];
+              history.push(`/model/domain/manager/${currentGap.domainId}/${modelId}`);
+            }}
+          >
+            打开模型并重新校验
+          </Button>
+        ) : null}
       </Drawer>
 
       <Modal

@@ -1,3 +1,9 @@
+/**
+ * Chat BI 单条消息编排组件。
+ *
+ * 职责：串联 parse/execute 请求、解析候选、结果卡和结构化诊断展示。
+ * 并发说明：组件状态按当前消息隔离，旧响应沿用现有消息实例边界处理。
+ */
 import {
   ChatContextType,
   DateInfoType,
@@ -8,6 +14,7 @@ import {
   ParseTimeCostType,
   RangeValue,
   SimilarQuestionType,
+  SemanticDiagnosticType,
 } from '../../common/type';
 import { createContext, useEffect, useRef, useState } from 'react';
 import {
@@ -94,6 +101,7 @@ const ChatItem: React.FC<Props> = ({
   const [parseInfoOptions, setParseInfoOptions] = useState<ChatContextType[]>([]);
   const [preParseInfoOptions, setPreParseInfoOptions] = useState<ChatContextType[]>([]);
   const [parseTip, setParseTip] = useState('');
+  const [semanticDiagnostic, setSemanticDiagnostic] = useState<SemanticDiagnosticType>();
   const [executeMode, setExecuteMode] = useState(false);
   const [preParseMode, setPreParseMode] = useState(false);
   const [showExpandParseTip, setShowExpandParseTip] = useState(false);
@@ -118,6 +126,7 @@ const ChatItem: React.FC<Props> = ({
     setShowExpandParseTip(false);
     setPreParseInfoOptions([]);
     setParseTip('');
+    setSemanticDiagnostic(undefined);
     setExecuteMode(false);
     setDimensionFilters([]);
     setData(undefined);
@@ -136,7 +145,10 @@ const ChatItem: React.FC<Props> = ({
     const { queryColumns, queryResults, queryState, queryMode, response, chatContext, errorMsg } =
       res.data || {};
     setExecuteErrorMsg(errorMsg);
-    if (res.code === 400 || res.code === 401 || res.code === 412) {
+    if (res.code === 400 && res.data && (res.data as any).code && (res.data as any).stage) {
+      setSemanticDiagnostic(res.data as unknown as SemanticDiagnosticType);
+      tip = (res.data as any).userMessage || res.msg;
+    } else if (res.code === 400 || res.code === 401 || res.code === 412) {
       tip = res.msg;
     } else if (res.code !== 200) {
       tip = SEARCH_EXCEPTION_TIP;
@@ -238,6 +250,9 @@ const ChatItem: React.FC<Props> = ({
     });
     setParseLoading(false);
     const { code, data } = parseData || {};
+    const diagnostic =
+      data?.diagnostic ||
+      (data?.code && data?.stage ? (data as SemanticDiagnosticType) : undefined);
     const { state, selectedParses, candidateParses, queryId, parseTimeCost, errorMsg } = data || {};
     const parses = selectedParses?.concat(candidateParses || []) || [];
     if (
@@ -247,6 +262,7 @@ const ChatItem: React.FC<Props> = ({
       (!parses[0]?.properties?.type && !parses[0]?.queryMode)
     ) {
       setParseTip(state === ParseStateEnum.FAILED && errorMsg ? errorMsg : PARSE_ERROR_TIP);
+      setSemanticDiagnostic(diagnostic);
 
       setParseInfo({ queryId } as any);
       return;
@@ -464,8 +480,8 @@ const ChatItem: React.FC<Props> = ({
 
   const { register, call } = useMethodRegister(() => message.error('该条消息暂不支持该操作'));
 
-  let actualQueryText=parseInfo?.properties?.CONTEXT?.queryText //  2025-05-27 增加判空，防止出现上下文没有 queryText 的情况
-  actualQueryText=actualQueryText==null?msg:actualQueryText
+  let actualQueryText = parseInfo?.properties?.CONTEXT?.queryText; //  2025-05-27 增加判空，防止出现上下文没有 queryText 的情况
+  actualQueryText = actualQueryText == null ? msg : actualQueryText;
   return (
     <ChartItemContext.Provider value={{ register, call }}>
       <div className={prefixCls}>
@@ -511,6 +527,7 @@ const ChatItem: React.FC<Props> = ({
                   integrateSystem={integrateSystem}
                   parseTimeCost={parseTimeCost?.parseTime}
                   isDeveloper={isDeveloper}
+                  diagnostic={semanticDiagnostic}
                   onSelectParseInfo={onSelectParseInfo}
                   onSwitchEntity={onSwitchEntity}
                   onFiltersChange={onFiltersChange}

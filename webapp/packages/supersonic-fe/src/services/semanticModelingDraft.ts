@@ -4,7 +4,7 @@
  * 职责：
  * - 统一封装阶段 3 草稿创建、重新生成、生成尝试、分页查询、详情保存和版本快照接口；
  * - 封装阶段 4 AI 多轮修订、版本差异、验证报告和提交审批门禁接口；
- * - 描述草稿 JSON 1.0 的前端数据结构，供列表、创建表单和详情工作台复用；
+ * - 描述历史完整草稿 JSON 1.0 与路由感知草稿 JSON 2.0，供列表、创建表单和详情工作台复用；
  * - 仅操作独立草稿接口，不调用正式模型、维度、指标、术语或发布接口。
  *
  * 并发说明：
@@ -22,6 +22,7 @@ const SEMANTIC_GAP_BASE_URL = '/api/semantic/gaps';
 export const MODELING_DRAFT_REVISION_INSTRUCTION_MAX_LENGTH = 2000;
 
 export type ModelingDraftSourceType = 'SEMANTIC_GAP' | 'DATA_SOURCE';
+export type ModelingDraftRouteAction = 'CREATE_NEW' | 'EXTEND_EXISTING';
 export type ModelingDraftStatus =
   | 'GENERATING'
   | 'DRAFT'
@@ -47,6 +48,14 @@ export type DraftDimension = {
   name: string;
   bizName?: string;
   field: string;
+  /** 2.0 增量草稿的受限派生定义；不允许承载任意 SQL。 */
+  derivation?: {
+    operator: 'DATE_DIFF';
+    startField: string;
+    endType: 'CURRENT_DATE' | 'FIELD';
+    endField?: string | null;
+    unit: 'DAY' | 'HOUR';
+  };
   semanticType?: string;
   aliases?: string[];
   description?: string;
@@ -128,10 +137,45 @@ export type SemanticModelDraftModel = {
 
 export type SemanticModelingDraftJson = {
   schemaVersion?: string;
+  /** 历史记录为空时按 CREATE_NEW 展示，但明确标记为未经过路由。 */
+  action?: ModelingDraftRouteAction;
+  routeSummary?: {
+    routeAnalysisId: number;
+    decisionSource?: 'RULE_ONLY' | 'RULE_AND_LLM' | string;
+    explanation?: string;
+    coveredCapabilities?: string[];
+    missingCapabilities?: string[];
+    queryOperations?: string[];
+    businessAnswers?: Record<string, unknown>;
+  };
   businessGoal: string;
   targetDomain?: DraftTargetDomain;
   models: SemanticModelDraftModel[];
   terms?: DraftTerm[];
+  targetAsset?: {
+    candidateHandle: string;
+    assetType: 'MODEL';
+    name: string;
+    baseVersion: number;
+    baseTable: string;
+  };
+  additions?: {
+    dimensions?: DraftDimension[];
+    metrics?: DraftMetric[];
+    terms?: DraftTerm[];
+    sensitiveFields?: DraftSensitiveField[];
+    aliases?: string[];
+    sampleQuestions?: string[];
+  };
+  modifications?: Array<{
+    objectType: string;
+    objectKey: string;
+    field: string;
+    beforeValue?: unknown;
+    afterValue?: unknown;
+    reason?: string;
+  }>;
+  regressionQuestions?: string[];
   uncertainties?: DraftUncertainty[];
 };
 
@@ -154,6 +198,13 @@ export type ModelingDraftItem = {
   selectedTables?: string[] | SelectedTable[] | string;
   chatModelId?: number;
   includeSampleData?: boolean;
+  /** 服务端确认并持久化的路由快照引用；历史草稿为空。 */
+  routeAnalysisId?: number;
+  /** 草稿实际消费的确认动作，前端不得根据评分自行推断。 */
+  routeAction?: ModelingDraftRouteAction;
+  routeTargetAssetType?: string;
+  /** 仅展示已确认基线版本；正式资产 ID 不属于草稿管理端响应契约。 */
+  routeTargetAssetVersion?: number;
   status: ModelingDraftStatus;
   currentDraft?: SemanticModelingDraftJson;
   draftJson?: string;
@@ -398,6 +449,8 @@ export type ModelingDraftQueryParams = {
 };
 
 export type CreateModelingDraftReq = {
+  /** 新路由流程必须引用服务端已确认且未过期的路由快照。 */
+  routeAnalysisId?: number;
   sourceType: ModelingDraftSourceType;
   sourceId?: number;
   businessGoal: string;

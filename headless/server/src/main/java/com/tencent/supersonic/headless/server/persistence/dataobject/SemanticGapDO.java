@@ -75,4 +75,18 @@ public class SemanticGapDO {
     private Long sourceChatId;
 
     private String recentQuestions;
+
+    private String diagnosticStage;
+
+    private String errorCode;
+
+    private String traceId;
+
+    private Integer errorLine;
+
+    private Integer errorColumn;
+
+    private String errorToken;
+
+    private String suggestion;
 }

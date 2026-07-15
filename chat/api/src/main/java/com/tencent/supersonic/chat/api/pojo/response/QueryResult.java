@@ -6,11 +6,17 @@ import com.tencent.supersonic.headless.api.pojo.AggregateInfo;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
+import com.tencent.supersonic.headless.api.pojo.response.SemanticDiagnostic;
 import lombok.Data;
 
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Chat BI 查询执行结果。
+ *
+ * <p>职责：承载物理查询结果和可选的语义诊断，使执行阶段失败可沿同一结构化协议返回前端。
+ */
 @Data
 public class QueryResult {
     private Long queryId;
@@ -28,4 +34,5 @@ public class QueryResult {
     private List<SchemaElement> recommendedDimensions;
     private AggregateInfo aggregateInfo;
     private String errorMsg;
+    private SemanticDiagnostic diagnostic;
 }

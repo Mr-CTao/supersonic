@@ -64,6 +64,10 @@ public class ModelingDraftContextBuilder {
 
     private static final String SCHEMA_RESOURCE = "schema/semantic-modeling-draft-v1.json";
     private static final String EXAMPLE_RESOURCE = "schema/semantic-modeling-draft-v1-example.json";
+    private static final String ROUTED_SCHEMA_RESOURCE =
+            "schema/semantic-modeling-draft-v2.json";
+    private static final String ROUTED_EXAMPLE_RESOURCE =
+            "schema/semantic-modeling-draft-v2-example.json";
     private static final int SAMPLE_VALUE_MAX_LENGTH = 256;
     private static final int EXISTING_ASSET_TOP_K_PER_TYPE = 20;
 
@@ -81,6 +85,9 @@ public class ModelingDraftContextBuilder {
     private final JsonNode schemaNode;
     private final JsonNode exampleNode;
     private final String outputContract;
+    private final JsonNode routedSchemaNode;
+    private final JsonNode routedExampleNode;
+    private final String routedOutputContract;
 
     /**
      * 创建上下文构建器并加载固定输出 Schema。
@@ -114,10 +121,14 @@ public class ModelingDraftContextBuilder {
         this.termService = termService;
         this.properties = properties;
         this.sensitivityClassifier = sensitivityClassifier;
-        this.schemaNode = loadSchema(objectMapper);
+        this.schemaNode = loadSchema(objectMapper, SCHEMA_RESOURCE);
         this.exampleNode = loadJsonResource(objectMapper, EXAMPLE_RESOURCE);
         validateExample(schemaNode, exampleNode);
         this.outputContract = buildOutputContract(exampleNode);
+        this.routedSchemaNode = loadSchema(objectMapper, ROUTED_SCHEMA_RESOURCE);
+        this.routedExampleNode = loadJsonResource(objectMapper, ROUTED_EXAMPLE_RESOURCE);
+        validateExample(routedSchemaNode, routedExampleNode);
+        this.routedOutputContract = buildRoutedOutputContract(routedExampleNode);
     }
 
     /**
@@ -191,9 +202,11 @@ public class ModelingDraftContextBuilder {
      */
     public GenerationContext build(PreflightSnapshot snapshot, User user) {
         ModelingDraftGenerateReq request = snapshot.request();
+        boolean routed = request.getRouteAnalysisId() != null
+                && StringUtils.isNotBlank(request.getRouteAction());
         Map<String, List<Map<String, Object>>> samples =
                 request.getIncludeSampleData() ? loadMaskedSamples(request, user) : Map.of();
-        String systemPrompt = buildSystemPrompt();
+        String systemPrompt = buildSystemPrompt(routed);
         String userPrompt = buildUserPrompt(snapshot, samples, true, true);
         int contextCharacterBudget = resolveContextCharacterBudget(snapshot.maxContextTokens());
 
@@ -214,8 +227,10 @@ public class ModelingDraftContextBuilder {
             throw new ModelingDraftException(HttpStatus.UNPROCESSABLE_ENTITY,
                     ModelingDraftConstants.ERROR_CONTEXT_TOO_LARGE, "建模上下文超过安全上限，请减少选表或缩短业务目标");
         }
-        return new GenerationContext(systemPrompt, userPrompt, outputContract,
-                schemaNode.deepCopy(), snapshot.columnsByTable(), snapshot.existingNames());
+        return new GenerationContext(systemPrompt, userPrompt,
+                routed ? routedOutputContract : outputContract,
+                routed ? routedSchemaNode.deepCopy() : schemaNode.deepCopy(),
+                snapshot.columnsByTable(), snapshot.existingNames());
     }
 
     /**
@@ -554,7 +569,7 @@ public class ModelingDraftContextBuilder {
     /** 构造不含表达式和正式写入字段的既有对象摘要。 */
     private Map<String, Object> summary(Long id, String name, String bizName, String aliases) {
         Map<String, Object> value = new LinkedHashMap<>();
-        value.put("id", id);
+        // LLM 只需名称语义判断冲突；正式对象 ID 不参与生成，也不能进入可持久化 Prompt。
         value.put("name", name);
         value.put("bizName", bizName);
         value.put("aliases", aliases);
@@ -591,13 +606,9 @@ public class ModelingDraftContextBuilder {
             return Map.of();
         }
         Map<String, Object> context = new LinkedHashMap<>();
-        context.put("gapId", gap.getId());
         context.put("question", gap.getQuestion());
         context.put("failureType", gap.getFailureType());
         context.put("failureReason", gap.getFailureReason());
-        context.put("matchedModelIds", gap.getMatchedModelIds());
-        context.put("matchedMetricIds", gap.getMatchedMetricIds());
-        context.put("matchedDimensionIds", gap.getMatchedDimensionIds());
         context.put("recentQuestions", gap.getRecentQuestions());
         // Gap 的可选字段允许为 null，不能使用拒绝 null 的 Map.copyOf。
         return Collections.unmodifiableMap(context);
@@ -652,14 +663,23 @@ public class ModelingDraftContextBuilder {
     }
 
     /** 构造固定系统约束，不包含数据或用户输入。 */
-    private String buildSystemPrompt() {
-        return "你是 SuperSonic AI 语义建模草稿助手。只输出符合给定 JSON Schema 1.0 的 JSON，"
+    private String buildSystemPrompt(boolean routed) {
+        String versionRule = routed
+                ? "只输出符合给定 JSON Schema 2.0 的 JSON，并严格遵循服务端 confirmedAssetRoute。"
+                : "只输出符合给定 JSON Schema 1.0 的 JSON。";
+        String incrementalRule = routed
+                ? "CREATE_NEW 输出完整 models；EXTEND_EXISTING 只能输出 targetAsset、additions、"
+                        + "modifications 和 regressionQuestions，禁止复制目标模型全文、删除正式对象、"
+                        + "改变既有指标含义或生成正式资产 ID。candidateHandle 必须原样使用服务端值。"
+                : "";
+        return "你是 SuperSonic AI 语义建模草稿助手。" + versionRule
                 + "不要输出 Markdown。每个模型必须且只能使用一个 selectedTables 中的 baseTable。"
                 + "维度必须引用该表单个字段；指标只能使用 SUM、COUNT、COUNT_DISTINCT、AVG、MAX、MIN "
                 + "和结构化 filters，禁止任意 SQL、子查询、JOIN、窗口函数或跨表表达式。"
                 + "术语只能通过草稿本地 objectKey 关联维度或指标。无法确定、别名冲突、状态枚举、"
                 + "跨表需求必须写入 uncertainties，不得编造表、字段、正式资产 ID 或样例值。"
-                + "识别可能的敏感字段并给出 maskingStrategy；生成可由业务人员理解的示例问法。";
+                + "识别可能的敏感字段并给出 maskingStrategy；生成可由业务人员理解的示例问法。"
+                + incrementalRule;
     }
 
     /** 按优先级组装用户 Prompt。 */
@@ -669,16 +689,18 @@ public class ModelingDraftContextBuilder {
         Map<String, Object> prompt = new LinkedHashMap<>();
         ModelingDraftGenerateReq request = snapshot.request();
         prompt.put("businessGoal", request.getBusinessGoal());
-        prompt.put("targetDomainId", request.getDomainId());
         prompt.put("sourceType", request.getSourceType());
+        if (request.getRouteAnalysisId() != null && StringUtils.isNotBlank(request.getRouteAction())) {
+            // 路由摘要由服务端确认快照生成；不向 LLM 暴露正式资产 ID、内部评分或未授权候选。
+            prompt.put("confirmedAssetRoute", request.getRouteContext());
+        }
         Map<String, Object> gapContext = new LinkedHashMap<>(snapshot.gapContext());
         if (!includeGapHistory) {
             gapContext.remove("recentQuestions");
         }
         prompt.put("gapContext", gapContext);
         prompt.put("dataSource",
-                Map.of("id", request.getDataSourceId(), "catalog",
-                        StringUtils.defaultString(request.getCatalogName()), "database",
+                Map.of("catalog", StringUtils.defaultString(request.getCatalogName()), "database",
                         StringUtils.defaultString(request.getDatabaseName())));
         prompt.put("selectedTableSchemas", snapshot.columnsByTable());
         if (includeExisting && !snapshot.existingSummary().isEmpty()) {
@@ -691,7 +713,7 @@ public class ModelingDraftContextBuilder {
         try {
             // 输出契约始终位于长上下文末尾，降低模型在大量字段元数据后遗忘字段名的概率。
             return "请基于以下可信上下文生成隔离的语义建模草稿：\n" + objectMapper.writeValueAsString(prompt) + "\n\n"
-                    + outputContract;
+                    + (request.getRouteAnalysisId() != null ? routedOutputContract : outputContract);
         } catch (JsonProcessingException exception) {
             throw new ModelingDraftException(HttpStatus.INTERNAL_SERVER_ERROR,
                     ModelingDraftConstants.ERROR_PROVIDER, "无法构建建模上下文");
@@ -703,6 +725,12 @@ public class ModelingDraftContextBuilder {
         ModelingDraftGenerateReq copy = new ModelingDraftGenerateReq();
         copy.setSourceType(source.getSourceType());
         copy.setSourceId(source.getSourceId());
+        copy.setRouteAnalysisId(source.getRouteAnalysisId());
+        copy.setRouteAction(source.getRouteAction());
+        copy.setRouteContext(new LinkedHashMap<>(source.getRouteContext()));
+        copy.setRouteTargetAssetType(source.getRouteTargetAssetType());
+        copy.setRouteTargetAssetId(source.getRouteTargetAssetId());
+        copy.setRouteTargetAssetVersion(source.getRouteTargetAssetVersion());
         copy.setTitle(source.getTitle());
         copy.setBusinessGoal(source.getBusinessGoal());
         copy.setDomainId(source.getDomainId());
@@ -716,8 +744,8 @@ public class ModelingDraftContextBuilder {
     }
 
     /** 从 classpath 加载并解析固定 JSON Schema。 */
-    private JsonNode loadSchema(ObjectMapper mapper) {
-        return loadJsonResource(mapper, SCHEMA_RESOURCE);
+    private JsonNode loadSchema(ObjectMapper mapper, String resource) {
+        return loadJsonResource(mapper, resource);
     }
 
     /** 从 classpath 加载固定 JSON 资源。 */
@@ -761,6 +789,25 @@ public class ModelingDraftContextBuilder {
                 + "4. terms 位于顶层；术语 targets 只能用 type 和 objectKey，objectKey 引用维度或指标 key。\n"
                 + "5. 无法单表确定的内容写入 uncertainties，不得新增 Schema 未声明字段。\n"
                 + "最小合法结构示例（selected_table 必须替换为真实选表）：\n" + example.toString();
+    }
+
+    /** 构造路由感知 2.0 草稿的紧凑输出契约，避免模型被历史 1.0 字段误导。 */
+    private String buildRoutedOutputContract(JsonNode example) {
+        return "输出契约（字段名和层级必须严格一致）：\n"
+                + "1. schemaVersion 固定为 2.0；action、routeSummary、businessGoal 和 "
+                + "targetAsset 必须与 confirmedAssetRoute 完全一致，不得改写。\n"
+                + "2. CREATE_NEW 使用 targetDomain/models/terms/uncertainties 生成完整新建草稿；"
+                + "targetAsset 和 additions 必须为 null。\n"
+                + "3. EXTEND_EXISTING 只能使用 targetAsset/additions/modifications/"
+                + "regressionQuestions/uncertainties；models 和顶层 terms 必须为空数组，"
+                + "禁止复制目标模型全文或删除正式对象。\n"
+                + "4. additions 内只允许 dimensions/metrics/terms/sensitiveFields/aliases/"
+                + "sampleQuestions；派生字段只能使用 Schema 声明的 DATE_DIFF 结构，"
+                + "禁止任意 SQL、正式资产 ID 和跨目标资产修改。\n"
+                + "5. modifications 只允许展示受控的 beforeValue/afterValue 差异；"
+                + "业务口径、粒度或版本无法确认时必须写入 uncertainties。\n"
+                + "最小合法结构示例（路由快照值必须使用服务端提供值）：\n"
+                + example.toString();
     }
 
     /** 统一不区分大小写的元数据比较。 */

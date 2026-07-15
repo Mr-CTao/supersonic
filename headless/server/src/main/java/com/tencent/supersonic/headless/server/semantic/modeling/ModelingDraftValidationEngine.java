@@ -41,6 +41,15 @@ public class ModelingDraftValidationEngine {
     private static final String CATEGORY_CONFLICT = "NAME_CONFLICT";
     private static final String CATEGORY_SENSITIVE = "SENSITIVE_FIELD";
     private static final String CATEGORY_UNCERTAINTY = "UNCERTAINTY";
+    /**
+     * 即使上游误标成 WARNING，也必须由服务端升级为阻塞的高风险业务分类。
+     *
+     * <p>这里使用稳定分类而不是中文文案判断，避免提示语调整导致门禁漂移。</p>
+     */
+    private static final Set<String> HIGH_RISK_UNCERTAINTY_CATEGORIES = Set.of(
+            "BUSINESS_GRAIN", "BUSINESS_DEFINITION", "SENSITIVE_FIELD", "CROSS_TABLE",
+            "CROSS_ASSET", "TARGET_VERSION_DRIFT", "TARGET_ASSET_PERMISSION",
+            "METRIC_SEMANTIC_CHANGE", "UNAUTHORIZED_MODIFICATION");
     private static final Set<String> BLOCKING_RETRIEVAL_WORDS = Set.of("数据", "信息", "查询", "列表", "详情",
             "全部", "所有", "data", "info", "query", "list", "detail", "all");
     private static final Set<String> WARNING_RETRIEVAL_WORDS = Set.of("名称", "类型", "状态", "结果", "统计",
@@ -82,30 +91,38 @@ public class ModelingDraftValidationEngine {
     public ModelingDraftValidationOutcome validate(ModelingDraftPayload payload,
             Map<String, List<DBColumn>> columnsByTable, Long dataSourceId, User user,
             int sqlPreviewLimit) {
+        // 增强草稿仅把 additions 映射为请求内校验视图；正式目标资产从不复制进草稿或校验结果。
+        ModelingDraftPayload validationPayload = payload.validationView();
         List<ModelingValidationFinding> blocking = new ArrayList<>();
         List<ModelingValidationFinding> warnings = new ArrayList<>();
-        List<ModelingPlannedObject> plannedObjects = collectPlannedObjects(payload);
+        List<ModelingPlannedObject> plannedObjects = collectPlannedObjects(validationPayload);
         Map<String, List<DBColumn>> normalizedColumns = normalizeColumns(columnsByTable);
 
         ModelingValidationCheckResult fieldResult = passed(CATEGORY_FIELD, "表、主时间字段、维度、指标和过滤字段均存在",
-                countFieldReferences(payload), "SERVER_METADATA");
-        ModelingValidationCheckResult conflictResult = inspectConflicts(payload, warnings);
+                countFieldReferences(validationPayload), "SERVER_METADATA");
+        ModelingValidationCheckResult conflictResult =
+                inspectConflicts(payload, blocking, warnings);
         ModelingValidationCheckResult pollutionResult =
                 inspectRetrievalPollution(payload, blocking, warnings);
         ModelingValidationCheckResult sensitiveResult =
-                inspectSensitiveFields(payload, normalizedColumns, blocking);
-        SampleValidation samples = draftSemanticValidationService.validate(payload, columnsByTable,
-                dataSourceId, user, sqlPreviewLimit);
+                inspectSensitiveFields(validationPayload, normalizedColumns, blocking);
+        SampleValidation samples = draftSemanticValidationService.validate(validationPayload,
+                columnsByTable, dataSourceId, user, sqlPreviewLimit);
         blocking.addAll(samples.blockingItems());
         warnings.addAll(samples.warningItems());
-        ModelingValidationCheckResult uncertaintyResult = inspectUncertainties(payload, blocking);
+        ModelingValidationCheckResult uncertaintyResult =
+                inspectUncertainties(payload, blocking, warnings);
         List<ModelingValidationCheckResult> requiredChecks = List.of(
-                passed(ModelingValidationGate.CHECK_JSON_SCHEMA, "草稿 JSON Schema 1.0 校验通过", 1,
+                passed(ModelingValidationGate.CHECK_JSON_SCHEMA,
+                        "草稿 JSON Schema " + StringUtils.defaultIfBlank(payload.getSchemaVersion(), "1.0")
+                                + " 校验通过",
+                        1,
                         "JSON_SCHEMA"),
                 passed(ModelingValidationGate.CHECK_TABLE_FIELD_EXISTENCE, "表、主时间字段、维度和过滤字段均存在",
-                        countFieldReferences(payload), "SERVER_METADATA"),
+                        countFieldReferences(validationPayload), "SERVER_METADATA"),
                 passed(ModelingValidationGate.CHECK_METRIC_EXPRESSION_FIELD,
-                        "指标表达式字段引用均已通过阶段 3 服务端校验", countMetrics(payload), "SERVER_METADATA"),
+                        "指标表达式字段引用均已通过阶段 3 服务端校验",
+                        countMetrics(validationPayload), "SERVER_METADATA"),
                 sensitiveResult, conflictResult, pollutionResult, samples.sampleQuestionResult(),
                 samples.sqlGenerationResult(), samples.sqlReadOnlyResult(),
                 samples.performanceResult());
@@ -166,20 +183,39 @@ public class ModelingDraftValidationEngine {
                 .filter(Objects::nonNull).mapToInt(Collection::size).sum();
     }
 
-    /** 将名称冲突不确定项转换为报告警告；最终是否阻断由未处理不确定项检查决定。 */
+    /**
+     * 将名称冲突不确定项转换为唯一一条门禁 finding。
+     *
+     * <p>Validator 负责发现并按稳定业务身份去重，Engine 只负责把严重级别映射到最终报告；
+     * {@link #inspectUncertainties(ModelingDraftPayload, List, List)} 会跳过该分类，避免同一冲突同时
+     * 生成 NAME_OR_ALIAS_CONFLICT 与 UNRESOLVED_UNCERTAINTY 两条 finding。</p>
+     */
     private ModelingValidationCheckResult inspectConflicts(ModelingDraftPayload payload,
+            List<ModelingValidationFinding> blocking,
             List<ModelingValidationFinding> warnings) {
         List<UncertaintyDraft> conflicts = safe(payload.getUncertainties()).stream()
                 .filter(item -> "ALIAS_CONFLICT".equals(item.getCategory())).toList();
+        int blockingCount = 0;
         for (UncertaintyDraft conflict : conflicts) {
-            warnings.add(finding(CATEGORY_CONFLICT, "NAME_OR_ALIAS_CONFLICT",
-                    ModelingDraftConstants.FINDING_WARNING, "$.uncertainties",
-                    sensitivityClassifier.sanitizeText(conflict.getReason()),
+            boolean isBlocking = ModelingDraftConstants.FINDING_BLOCKING
+                    .equalsIgnoreCase(conflict.getSeverity());
+            List<ModelingValidationFinding> target = isBlocking ? blocking : warnings;
+            target.add(finding(CATEGORY_CONFLICT, "NAME_OR_ALIAS_CONFLICT",
+                    isBlocking ? ModelingDraftConstants.FINDING_BLOCKING
+                            : ModelingDraftConstants.FINDING_WARNING,
+                    "$.uncertainties", sensitivityClassifier.sanitizeText(conflict.getReason()),
                     conflict.getModelKey()));
+            if (isBlocking) {
+                blockingCount++;
+            }
         }
-        return checkResult(CATEGORY_CONFLICT, conflicts.isEmpty() ? "PASSED" : "WARNING",
-                conflicts.isEmpty() ? "未发现名称或别名冲突" : "发现名称或别名冲突，需要管理员确认或修订", conflicts.size(),
-                conflicts.isEmpty() ? 0 : 0, conflicts.size(), "AUTHORIZED_ASSET_NAMES");
+        String status = blockingCount > 0 ? ModelingDraftConstants.VALIDATION_FAILED
+                : conflicts.isEmpty() ? ModelingDraftConstants.VALIDATION_PASSED
+                        : ModelingDraftConstants.VALIDATION_WARNING;
+        String summary = blockingCount > 0 ? "发现与现有资产或其他草稿对象的名称冲突，必须修订"
+                : conflicts.isEmpty() ? "未发现名称或别名冲突" : "发现名称或别名冲突，需要管理员确认";
+        return checkResult(CATEGORY_CONFLICT, status, summary, conflicts.size(),
+                conflicts.size() - blockingCount, blockingCount, "AUTHORIZED_ASSET_NAMES");
     }
 
     /**
@@ -215,11 +251,17 @@ public class ModelingDraftValidationEngine {
     /** 收集模型、维度、指标、术语及其别名，不收集描述和样例文本。 */
     private List<RetrievalNameCandidate> retrievalCandidates(ModelingDraftPayload payload) {
         List<RetrievalNameCandidate> candidates = new ArrayList<>();
-        for (ModelDraft model : safe(payload.getModels())) {
+        ModelingDraftPayload validationPayload = payload.validationView();
+        for (ModelDraft model : safe(validationPayload.getModels())) {
             addNameCandidate(candidates, "MODEL", model.getKey(), model.getKey(),
                     "$.models[" + model.getKey() + "].name", model.getName(), false);
             addOptionalNameCandidate(candidates, "MODEL", model.getKey(), model.getKey(),
                     "$.models[" + model.getKey() + "].bizName", model.getBizName(), false);
+            int modelAliasIndex = 0;
+            for (String alias : safe(model.getValidationAliases())) {
+                addNameCandidate(candidates, "MODEL", model.getKey(), model.getKey(),
+                        "$.additions.aliases[" + modelAliasIndex++ + "]", alias, true);
+            }
             for (DimensionDraft dimension : safe(model.getDimensions())) {
                 collectElementCandidates(candidates, "DIMENSION", dimension.getKey(),
                         model.getKey(), dimension.getName(), dimension.getBizName(),
@@ -230,7 +272,7 @@ public class ModelingDraftValidationEngine {
                         metric.getName(), metric.getBizName(), metric.getAliases());
             }
         }
-        for (TermDraft term : safe(payload.getTerms())) {
+        for (TermDraft term : safe(validationPayload.getTerms())) {
             addNameCandidate(candidates, "TERM", term.getKey(), null,
                     "$.terms[" + term.getKey() + "].name", term.getName(), false);
             int aliasIndex = 0;
@@ -399,20 +441,54 @@ public class ModelingDraftValidationEngine {
         return "HIGH".equalsIgnoreCase(level) || "CRITICAL".equalsIgnoreCase(level);
     }
 
-    /** 把所有尚未消除的不确定项作为提交审批阻塞项。 */
+    /**
+     * 按统一严重级别策略处理尚未消除的不确定项。
+     *
+     * <p>BLOCKING 阻止提交，WARNING 只进入警告集合，INFO 仅保留在草稿正文中供页面解释。
+     * 粒度、敏感字段、跨表/跨资产、目标版本漂移和越权修改属于高风险分类，即使上游误标为
+     * WARNING 也会在这里升级为阻塞，确保报告统计和 submit gate 使用同一服务端结果。</p>
+     */
     private ModelingValidationCheckResult inspectUncertainties(ModelingDraftPayload payload,
-            List<ModelingValidationFinding> blocking) {
+            List<ModelingValidationFinding> blocking,
+            List<ModelingValidationFinding> warnings) {
         List<UncertaintyDraft> uncertainties = safe(payload.getUncertainties());
+        int blockingCount = 0;
+        int warningCount = 0;
         for (UncertaintyDraft uncertainty : uncertainties) {
-            blocking.add(finding(CATEGORY_UNCERTAINTY, "UNRESOLVED_UNCERTAINTY",
-                    ModelingDraftConstants.FINDING_BLOCKING, "$.uncertainties",
-                    sensitivityClassifier.sanitizeText(
-                            StringUtils.defaultIfBlank(uncertainty.getReason(), "存在尚未处理的不确定项")),
-                    uncertainty.getModelKey()));
+            if ("ALIAS_CONFLICT".equalsIgnoreCase(uncertainty.getCategory())) {
+                // 名称冲突已由 inspectConflicts 生成带专用 code 的唯一 finding。
+                continue;
+            }
+            String severity = StringUtils.upperCase(
+                    StringUtils.defaultIfBlank(uncertainty.getSeverity(),
+                            ModelingDraftConstants.FINDING_BLOCKING),
+                    Locale.ROOT);
+            String category = StringUtils.upperCase(
+                    StringUtils.defaultString(uncertainty.getCategory()), Locale.ROOT);
+            boolean highRisk = HIGH_RISK_UNCERTAINTY_CATEGORIES.contains(category);
+            String message = sensitivityClassifier.sanitizeText(
+                    StringUtils.defaultIfBlank(uncertainty.getReason(), "存在尚未处理的不确定项"));
+            if (ModelingDraftConstants.FINDING_BLOCKING.equals(severity) || highRisk
+                    || (!ModelingDraftConstants.FINDING_WARNING.equals(severity)
+                            && !ModelingDraftConstants.FINDING_INFO.equals(severity))) {
+                blocking.add(finding(CATEGORY_UNCERTAINTY, "UNRESOLVED_UNCERTAINTY",
+                        ModelingDraftConstants.FINDING_BLOCKING, "$.uncertainties", message,
+                        uncertainty.getModelKey()));
+                blockingCount++;
+            } else if (ModelingDraftConstants.FINDING_WARNING.equals(severity)) {
+                warnings.add(finding(CATEGORY_UNCERTAINTY, "UNRESOLVED_UNCERTAINTY",
+                        ModelingDraftConstants.FINDING_WARNING, "$.uncertainties", message,
+                        uncertainty.getModelKey()));
+                warningCount++;
+            }
         }
-        return checkResult(CATEGORY_UNCERTAINTY, uncertainties.isEmpty() ? "PASSED" : "FAILED",
-                uncertainties.isEmpty() ? "不存在未处理不确定项" : "存在未处理不确定项，提交审批前必须修订",
-                uncertainties.size(), 0, uncertainties.size(), "DRAFT_UNCERTAINTIES");
+        String status = blockingCount > 0 ? ModelingDraftConstants.VALIDATION_FAILED
+                : warningCount > 0 ? ModelingDraftConstants.VALIDATION_WARNING
+                        : ModelingDraftConstants.VALIDATION_PASSED;
+        String summary = blockingCount > 0 ? "存在阻塞级业务问题，提交审批前必须修订"
+                : warningCount > 0 ? "存在需要管理员关注的警告，但不阻止提交" : "不存在阻塞级不确定项";
+        return checkResult(CATEGORY_UNCERTAINTY, status, summary, uncertainties.size(),
+                uncertainties.size() - blockingCount, blockingCount, "DRAFT_UNCERTAINTIES");
     }
 
     /** 创建字段级验证发现。 */

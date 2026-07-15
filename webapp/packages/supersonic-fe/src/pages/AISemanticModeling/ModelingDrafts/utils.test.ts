@@ -86,6 +86,45 @@ describe('ModelingDrafts utils', () => {
     expect(String(tree[2].title)).toBe('域级不确定项（1）');
   });
 
+  it('builds an additions-only tree for an extend-existing draft', () => {
+    const incrementalDraft: SemanticModelingDraftJson = {
+      schemaVersion: '2.0',
+      action: 'EXTEND_EXISTING',
+      businessGoal: '补充呆滞时长',
+      models: [],
+      targetAsset: {
+        candidateHandle: 'candidate_1',
+        assetType: 'MODEL',
+        name: '库存汇总',
+        baseVersion: 7,
+        baseTable: 'stock_summary',
+      },
+      additions: {
+        dimensions: [
+          {
+            key: 'sluggishDuration',
+            name: '呆滞时长',
+            field: 'sluggish_duration_days',
+          },
+        ],
+        metrics: [],
+        terms: [],
+      },
+      modifications: [],
+      regressionQuestions: ['查询呆滞时长前十'],
+      uncertainties: [],
+    };
+
+    const tree = buildDraftTreeData(incrementalDraft);
+
+    expect(String(tree[0].title)).toContain('目标资产（只读）');
+    expect(String(tree[0].title)).toContain('库存汇总');
+    expect(tree.map((node) => String(node.title))).not.toContain('模型（0）');
+    expect(tree[1].children?.map((node) => String(node.title))).toEqual(
+      expect.arrayContaining(['新增维度（1）', '新增指标（0）', '回归问法（1）']),
+    );
+  });
+
   it('formats legacy string arrays and structured selected tables', () => {
     expect(formatSelectedTables(['stock', 'warehouse'])).toBe('stock、warehouse');
     expect(

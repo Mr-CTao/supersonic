@@ -113,6 +113,13 @@ const DraftWorkbenchContent: React.FC<Props> = ({
   const treeData = useMemo(() => buildDraftTreeData(draft), [draft]);
   const businessGoal = draft?.businessGoal || detail.businessGoal || '-';
   const editable = detail.status === 'DRAFT' && !writeBlockedReason;
+  const routeAction = detail.routeAction || draft?.action;
+  const routeAnalysisId = detail.routeAnalysisId || draft?.routeSummary?.routeAnalysisId;
+  const incrementalObjectCount =
+    (draft?.additions?.dimensions?.length || 0) +
+    (draft?.additions?.metrics?.length || 0) +
+    (draft?.additions?.terms?.length || 0) +
+    (draft?.modifications?.length || 0);
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
@@ -165,9 +172,40 @@ const DraftWorkbenchContent: React.FC<Props> = ({
       {writeBlockedReason ? (
         <Alert showIcon type="warning" title="草稿暂时只读" description={writeBlockedReason} />
       ) : null}
+      {routeAction === 'EXTEND_EXISTING' ? (
+        <Alert
+          showIcon
+          type="info"
+          title="增强已有资产"
+          description={
+            <Space wrap>
+              <Text>目标：{draft?.targetAsset?.name || '-'}</Text>
+              <Text>基线版本：{draft?.targetAsset?.baseVersion ?? '-'}</Text>
+              <Text>当前增量对象：{incrementalObjectCount}</Text>
+            </Space>
+          }
+        />
+      ) : null}
+      {!routeAnalysisId ? (
+        <Alert
+          showIcon
+          type="warning"
+          title="历史草稿，未经过资产路由分析"
+          description="该记录按完整新建草稿兼容读取；重新发起建模时必须先分析现有资产。"
+        />
+      ) : null}
 
       <Descriptions bordered column={3} size="small">
         <Descriptions.Item label="状态">{renderStatus(detail.status)}</Descriptions.Item>
+        <Descriptions.Item label="处理方式">
+          {routeAction === 'EXTEND_EXISTING' ? (
+            <Tag color="purple">增强</Tag>
+          ) : routeAnalysisId ? (
+            <Tag color="blue">新建</Tag>
+          ) : (
+            <Tag>历史未路由</Tag>
+          )}
+        </Descriptions.Item>
         <Descriptions.Item label="来源">
           {detail.sourceType === 'SEMANTIC_GAP'
             ? `语义缺口 #${detail.sourceId || '-'}`

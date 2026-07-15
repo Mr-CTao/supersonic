@@ -1,3 +1,8 @@
+/**
+ * Chat SDK 公共类型。
+ *
+ * 职责：统一描述解析、执行、消息和可选结构化语义诊断；所有字段保持向后兼容。
+ */
 import { Dayjs } from 'dayjs';
 import { ChatContextTypeQueryTypeEnum } from './constants';
 
@@ -167,6 +172,24 @@ export type ParseDataType = {
   selectedParses: ChatContextType[];
   candidateParses: ChatContextType[];
   similarSolvedQuery: SimilarQuestionType[];
+  diagnostic?: SemanticDiagnosticType;
+};
+
+export type SemanticDiagnosticType = {
+  code?: string;
+  stage?: string;
+  severity?: string;
+  modelId?: number;
+  modelName?: string;
+  dataSetId?: number;
+  engineType?: string;
+  line?: number;
+  column?: number;
+  token?: string;
+  userMessage?: string;
+  developerMessage?: string;
+  suggestion?: string;
+  traceId?: string;
 };
 
 export type QueryDataType = {

@@ -11,6 +11,7 @@ import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticMod
 import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticModelingDraftDO;
 import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticModelingDraftVersionDO;
 import com.tencent.supersonic.headless.server.persistence.mapper.SemanticGapMapper;
+import com.tencent.supersonic.headless.server.persistence.mapper.SemanticAssetRoutingMapper;
 import com.tencent.supersonic.headless.server.persistence.mapper.SemanticModelingDraftAttemptMapper;
 import com.tencent.supersonic.headless.server.persistence.mapper.SemanticModelingDraftMapper;
 import com.tencent.supersonic.headless.server.persistence.mapper.SemanticModelingDraftVersionMapper;
@@ -61,6 +62,7 @@ class ModelingDraftStoreTest {
     private static final Long DRAFT_ID = 101L;
     private static final Long GAP_ID = 201L;
     private static final Long CONVERSATION_ID = 301L;
+    private static final Long ROUTE_ANALYSIS_ID = 401L;
     private static final String IDEMPOTENCY_KEY = "gap-draft-201";
     private static final String DRAFT_JSON = "{\"schemaVersion\":\"1.0\"}";
 
@@ -75,6 +77,9 @@ class ModelingDraftStoreTest {
 
     @Mock
     private SemanticGapMapper gapMapper;
+
+    @Mock
+    private SemanticAssetRoutingMapper routingMapper;
 
     @Mock
     private ModelingDraftRevisionStore revisionStore;
@@ -111,7 +116,7 @@ class ModelingDraftStoreTest {
     @BeforeEach
     void setUp() {
         store = new ModelingDraftStore(draftMapper, attemptMapper, versionMapper, gapMapper,
-                objectMapper, revisionStore);
+                routingMapper, objectMapper, revisionStore);
     }
 
     /** 同一 Gap 已存在活动草稿时必须复用该记录，不得再插入草稿或重复改变 Gap 状态。 */
@@ -121,9 +126,15 @@ class ModelingDraftStoreTest {
         SemanticGapDO lockedGap = newGap(SemanticGapStatus.PENDING_ANALYSIS);
         SemanticModelingDraftDO activeDraft =
                 newDraft(ModelingDraftConstants.STATUS_PENDING_APPROVAL, 2, 3);
+        SemanticModelingDraftAttemptDO initialAttempt = new SemanticModelingDraftAttemptDO();
+        initialAttempt.setDraftId(activeDraft.getId());
+        initialAttempt.setAttemptNo(1);
+        initialAttempt.setTriggerType(ModelingDraftConstants.ATTEMPT_TRIGGER_INITIAL);
+        initialAttempt.setRequestFingerprint("fingerprint");
         when(draftMapper.selectByIdempotencyKey(user.getName(), IDEMPOTENCY_KEY)).thenReturn(null);
         when(gapMapper.selectByIdForUpdate(GAP_ID)).thenReturn(lockedGap);
         when(draftMapper.selectOne(any())).thenReturn(activeDraft);
+        when(attemptMapper.selectOne(any())).thenReturn(initialAttempt);
 
         CreateResult result = store.createGenerating(request, IDEMPOTENCY_KEY, "fingerprint", user);
 
@@ -137,6 +148,82 @@ class ModelingDraftStoreTest {
         assertTrue(activeQueryCaptor.getValue().getParamNameValuePairs()
                 .containsValue(ModelingDraftConstants.STATUS_PENDING_APPROVAL));
         verify(draftMapper, never()).insert(any(SemanticModelingDraftDO.class));
+        verify(gapMapper, never()).updateById(any(SemanticGapDO.class));
+    }
+
+    /** 同一路由的活动草稿若生成参数指纹不同，必须返回幂等冲突而不是误复用。 */
+    @Test
+    void shouldRejectActiveGapDraftWhenCreationFingerprintDiffers() {
+        ModelingDraftGenerateReq request = newGapRequest();
+        SemanticModelingDraftDO activeDraft =
+                newDraft(ModelingDraftConstants.STATUS_GENERATING, 0, 0);
+        SemanticModelingDraftAttemptDO initialAttempt = new SemanticModelingDraftAttemptDO();
+        initialAttempt.setDraftId(activeDraft.getId());
+        initialAttempt.setAttemptNo(1);
+        initialAttempt.setTriggerType(ModelingDraftConstants.ATTEMPT_TRIGGER_INITIAL);
+        initialAttempt.setRequestFingerprint("previous-fingerprint");
+        when(draftMapper.selectByIdempotencyKey(user.getName(), IDEMPOTENCY_KEY)).thenReturn(null);
+        when(gapMapper.selectByIdForUpdate(GAP_ID)).thenReturn(newGap(SemanticGapStatus.DRAFTING));
+        when(draftMapper.selectOne(any())).thenReturn(activeDraft);
+        when(attemptMapper.selectOne(any())).thenReturn(initialAttempt);
+
+        ModelingDraftException exception = assertThrows(ModelingDraftException.class,
+                () -> store.createGenerating(request, IDEMPOTENCY_KEY, "new-fingerprint", user));
+
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
+        assertEquals(ModelingDraftConstants.ERROR_IDEMPOTENCY_CONFLICT,
+                exception.getErrorCode());
+        verify(draftMapper, never()).insert(any(SemanticModelingDraftDO.class));
+        verify(routingMapper, never()).consumeCreateRoute(any(), any(), any());
+    }
+
+    /** 新草稿、首次 attempt、Gap 状态和已确认路由必须在同一短事务中建立稳定关联。 */
+    @Test
+    void shouldConsumeConfirmedCreateRouteWhenDraftIsInserted() {
+        ModelingDraftGenerateReq request = newGapRequest();
+        SemanticGapDO lockedGap = newGap(SemanticGapStatus.PENDING_ANALYSIS);
+        when(draftMapper.selectByIdempotencyKey(user.getName(), IDEMPOTENCY_KEY)).thenReturn(null);
+        when(gapMapper.selectByIdForUpdate(GAP_ID)).thenReturn(lockedGap);
+        when(draftMapper.selectOne(any())).thenReturn(null);
+        when(draftMapper.insert(any(SemanticModelingDraftDO.class))).thenAnswer(invocation -> {
+            SemanticModelingDraftDO inserted = invocation.getArgument(0);
+            inserted.setId(DRAFT_ID);
+            return 1;
+        });
+        when(routingMapper.consumeCreateRoute(ROUTE_ANALYSIS_ID, DRAFT_ID, user.getName()))
+                .thenReturn(1);
+
+        CreateResult result = store.createGenerating(request, IDEMPOTENCY_KEY, "fingerprint", user);
+
+        assertFalse(result.replay());
+        assertEquals(ROUTE_ANALYSIS_ID, result.draft().getRouteAnalysisId());
+        assertEquals(ModelingDraftConstants.ACTION_CREATE_NEW, result.draft().getRouteAction());
+        verify(routingMapper).consumeCreateRoute(ROUTE_ANALYSIS_ID, DRAFT_ID, user.getName());
+        verify(attemptMapper).insert(any(SemanticModelingDraftAttemptDO.class));
+        verify(gapMapper).updateById(lockedGap);
+    }
+
+    /** 路由已过期或被并发消费时必须拒绝创建，事务代理会回滚刚插入的草稿。 */
+    @Test
+    void shouldFailClosedWhenConfirmedRouteCannotBeConsumed() {
+        ModelingDraftGenerateReq request = newGapRequest();
+        when(draftMapper.selectByIdempotencyKey(user.getName(), IDEMPOTENCY_KEY)).thenReturn(null);
+        when(gapMapper.selectByIdForUpdate(GAP_ID))
+                .thenReturn(newGap(SemanticGapStatus.PENDING_ANALYSIS));
+        when(draftMapper.selectOne(any())).thenReturn(null);
+        when(draftMapper.insert(any(SemanticModelingDraftDO.class))).thenAnswer(invocation -> {
+            SemanticModelingDraftDO inserted = invocation.getArgument(0);
+            inserted.setId(DRAFT_ID);
+            return 1;
+        });
+        when(routingMapper.consumeCreateRoute(ROUTE_ANALYSIS_ID, DRAFT_ID, user.getName()))
+                .thenReturn(0);
+
+        ModelingDraftException exception = assertThrows(ModelingDraftException.class,
+                () -> store.createGenerating(request, IDEMPOTENCY_KEY, "fingerprint", user));
+
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
+        verify(attemptMapper, never()).insert(any(SemanticModelingDraftAttemptDO.class));
         verify(gapMapper, never()).updateById(any(SemanticGapDO.class));
     }
 
@@ -313,6 +400,8 @@ class ModelingDraftStoreTest {
         ModelingDraftGenerateReq request = new ModelingDraftGenerateReq();
         request.setSourceType(ModelingDraftConstants.SOURCE_SEMANTIC_GAP);
         request.setSourceId(GAP_ID);
+        request.setRouteAnalysisId(ROUTE_ANALYSIS_ID);
+        request.setRouteAction(ModelingDraftConstants.ACTION_CREATE_NEW);
         request.setBusinessGoal("分析订单销售额");
         request.setDataSourceId(7L);
         request.setSelectedTables(List.of("orders"));
@@ -334,6 +423,8 @@ class ModelingDraftStoreTest {
         draft.setId(DRAFT_ID);
         draft.setSourceType(ModelingDraftConstants.SOURCE_SEMANTIC_GAP);
         draft.setSourceId(GAP_ID);
+        draft.setRouteAnalysisId(ROUTE_ANALYSIS_ID);
+        draft.setRouteAction(ModelingDraftConstants.ACTION_CREATE_NEW);
         draft.setStatus(status);
         draft.setCurrentVersionNo(currentVersionNo);
         draft.setCurrentAttemptNo(1);

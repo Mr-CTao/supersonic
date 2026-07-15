@@ -43,6 +43,12 @@ import java.util.stream.Collectors;
 
 import static com.tencent.supersonic.common.pojo.Constants.AT_SYMBOL;
 
+/**
+ * 语义 Schema 聚合与缓存服务。
+ *
+ * <p>职责：按数据集/模型聚合维度、指标和关系，并维护短期本地缓存。资产事件通过精确模型匹配立即
+ * 失效相关缓存；Guava Cache 提供线程安全访问，但跨实例一致性仍依赖部署层事件广播。
+ */
 @Slf4j
 @Service
 public class SchemaServiceImpl implements SchemaService {
@@ -144,6 +150,45 @@ public class SchemaServiceImpl implements SchemaService {
     @Override
     public SemanticSchema getSemanticSchema(Set<Long> dataSetIds) {
         return new SemanticSchema(getDataSetSchema(dataSetIds));
+    }
+
+    /**
+     * 立即失效包含指定模型的 Schema 缓存项。
+     *
+     * <p>
+     * 并发决策：Guava Cache 的显式失效是线程安全操作；先从快照筛选 key，再逐项 invalidate， 避免遍历期间并发装载影响筛选结果。这里只清理本
+     * JVM，跨实例传播依赖部署层广播 DataEvent。
+     *
+     * @param modelIds 本次资产事件涉及的模型 ID。
+     * @return 实际失效的缓存项数量。
+     */
+    public int invalidateModelSchemas(Collection<Long> modelIds) {
+        if (CollectionUtils.isEmpty(modelIds)) {
+            return 0;
+        }
+        Set<Long> targetIds =
+                modelIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<DataSetFilterReq> dataSetKeys = dataSetSchemaCache.asMap().entrySet().stream()
+                .filter(entry -> containsAnyModel(entry.getValue(), targetIds))
+                .map(Map.Entry::getKey).collect(Collectors.toSet());
+        Set<SchemaFilterReq> semanticKeys = semanticSchemaCache.asMap().entrySet().stream()
+                .filter(entry -> entry.getValue() != null && entry.getValue().getModelIds() != null
+                        && !Collections.disjoint(entry.getValue().getModelIds(), targetIds))
+                .map(Map.Entry::getKey).collect(Collectors.toSet());
+        dataSetKeys.forEach(dataSetSchemaCache::invalidate);
+        semanticKeys.forEach(semanticSchemaCache::invalidate);
+        return dataSetKeys.size() + semanticKeys.size();
+    }
+
+    /** 判断数据集 Schema 快照是否包含任一目标模型。 */
+    private boolean containsAnyModel(List<DataSetSchemaResp> schemas, Set<Long> targetIds) {
+        if (CollectionUtils.isEmpty(schemas)) {
+            return false;
+        }
+        return schemas.stream().filter(Objects::nonNull)
+                .flatMap(schema -> Optional.ofNullable(schema.getModelResps())
+                        .orElse(Collections.emptyList()).stream())
+                .map(ModelResp::getId).filter(Objects::nonNull).anyMatch(targetIds::contains);
     }
 
     public List<DataSetSchemaResp> buildDataSetSchema(DataSetFilterReq filter) {

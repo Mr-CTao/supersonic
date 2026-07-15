@@ -1,6 +1,18 @@
+/**
+ * Chat BI 解析状态与结构化诊断卡。
+ *
+ * 职责：普通用户显示安全可执行消息；开发者按权限展开阶段、位置、token、建议和 traceId。
+ * 安全说明：所有文本经 React 转义，复制内容长度受限，不使用 HTML 注入。
+ */
 import React, { ReactNode } from 'react';
-import { ChatContextType, DateInfoType, EntityInfoType, FilterItemType } from '../../common/type';
-import { Button, DatePicker, Row, Col } from 'antd';
+import {
+  ChatContextType,
+  DateInfoType,
+  EntityInfoType,
+  FilterItemType,
+  SemanticDiagnosticType,
+} from '../../common/type';
+import { Button, Collapse, DatePicker, Row, Col, Space, Tag, message } from 'antd';
 import { CheckCircleFilled, CloseCircleFilled, ReloadOutlined } from '@ant-design/icons';
 import Loading from './Loading';
 import FilterItem from './FilterItem';
@@ -10,6 +22,7 @@ import { isMobile } from '../../utils/utils';
 import dayjs, { Dayjs } from 'dayjs';
 import quarterOfYear from 'dayjs/plugin/quarterOfYear';
 import { prefixCls, getTipNode } from './ParseTipUtils';
+import { diagnosticCopyText, diagnosticTitle } from './SemanticDiagnosticUtils';
 
 import 'dayjs/locale/zh-cn';
 
@@ -31,6 +44,7 @@ type Props = {
   parseTimeCost?: number;
   isDeveloper?: boolean;
   isSimpleMode?: boolean;
+  diagnostic?: SemanticDiagnosticType;
   onSelectParseInfo: (parseInfo: ChatContextType) => void;
   onSwitchEntity: (entityId: string) => void;
   onFiltersChange: (filters: FilterItemType[]) => void;
@@ -55,6 +69,7 @@ const ParseTip: React.FC<Props> = ({
   integrateSystem,
   parseTimeCost,
   isDeveloper,
+  diagnostic,
   onSelectParseInfo,
   onSwitchEntity,
   onFiltersChange,
@@ -107,6 +122,78 @@ const ParseTip: React.FC<Props> = ({
 
   if (parseLoading) {
     return getNode('意图解析中');
+  }
+
+  if (diagnostic) {
+    const safeCopyText = diagnosticCopyText(diagnostic);
+    const developerDetails = isDeveloper ? (
+      <Collapse
+        size="small"
+        items={[
+          {
+            key: 'diagnostic',
+            label: '查看诊断详情',
+            children: (
+              <Space direction="vertical" size={4}>
+                <div>
+                  查询理解 <Tag color="success">成功</Tag>
+                </div>
+                <div>
+                  语义查询生成 <Tag color="success">成功</Tag>
+                </div>
+                <div>
+                  模型 SQL 编译 <Tag color="error">失败</Tag>
+                </div>
+                <div>
+                  物理 SQL 执行 <Tag>未执行</Tag>
+                </div>
+                <div>
+                  模型：{diagnostic.modelName || '-'} / {diagnostic.modelId || '-'}
+                </div>
+                <div>数据集：{diagnostic.dataSetId || '-'}</div>
+                <div>
+                  阶段 / 错误码：{diagnostic.stage || '-'} / {diagnostic.code || '-'}
+                </div>
+                <div>
+                  位置：{diagnostic.line || '-'}:{diagnostic.column || '-'} /{' '}
+                  {diagnostic.token || '-'}
+                </div>
+                <div>{diagnostic.developerMessage}</div>
+                <div>{diagnostic.suggestion}</div>
+                <div>traceId：{diagnostic.traceId || '-'}</div>
+                <Button
+                  aria-label="复制诊断信息"
+                  size="small"
+                  title="复制诊断信息"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(safeCopyText);
+                      message.success('诊断信息已复制');
+                    } catch {
+                      message.error('复制失败，请检查浏览器剪贴板权限');
+                    }
+                  }}
+                >
+                  复制诊断信息
+                </Button>
+              </Space>
+            ),
+          },
+        ]}
+      />
+    ) : null;
+    return getNode(
+      diagnosticTitle(diagnostic.stage),
+      <Space direction="vertical" size={8}>
+        <div>{diagnostic.userMessage || '语义模型当前不可用，请联系模型管理员重新校验模型。'}</div>
+        <div>
+          请联系模型管理员重新校验模型
+          {diagnostic.traceId ? `（traceId: ${diagnostic.traceId}）` : ''}
+        </div>
+        {developerDetails}
+      </Space>,
+      true
+    );
   }
 
   if (parseTip) {

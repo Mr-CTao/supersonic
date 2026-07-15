@@ -180,6 +180,40 @@ class LlmConversationGatewayServiceTest {
         assertNull(logCaptor.getValue().getRawResponseRef());
     }
 
+    /** 高敏调用可只落盘不可逆摘要，同时 Provider 仍收到当前请求原文。 */
+    @Test
+    void nonPersistentUserContentShouldStoreHashButSendCurrentPrompt() {
+        when(conversationMapper.selectById(CONVERSATION_ID))
+                .thenReturn(semanticModelingConversation());
+        String prompt = "脱敏后的受限候选上下文";
+        java.util.concurrent.atomic.AtomicReference<LlmMessageDO> persisted =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        doAnswer(invocation -> {
+            LlmMessageDO message = invocation.getArgument(0);
+            message.setId(101L);
+            persisted.set(message);
+            return 1;
+        }).when(messageMapper).insert(any(LlmMessageDO.class));
+        when(messageMapper.selectList(any())).thenAnswer(invocation -> persisted.get() == null
+                ? List.of()
+                : List.of(persisted.get()));
+        when(adapter.chat(any(LlmChatRequest.class))).thenReturn(
+                LlmChatResponse.builder().success(true).content("{}")
+                        .parsedJson(JsonUtil.readTree("{}")).build());
+        LlmMessageCreateReq request = jsonRequest();
+        request.setContent(prompt);
+        request.setPersistUserContent(false);
+
+        gatewayService.appendMessageAndChat(CONVERSATION_ID, request);
+
+        assertFalse(persisted.get().getContent().contains(prompt));
+        assertTrue(persisted.get().getContent().startsWith("[prompt omitted; sha256="));
+        ArgumentCaptor<LlmChatRequest> adapterRequest =
+                ArgumentCaptor.forClass(LlmChatRequest.class);
+        verify(adapter).chat(adapterRequest.capture());
+        assertEquals(prompt, adapterRequest.getValue().getMessages().getLast().getContent());
+    }
+
     @Test
     void providerFailureWithoutAssistantContentShouldKeepPreviousBehavior() {
         when(adapter.chat(any(LlmChatRequest.class))).thenReturn(

@@ -11,6 +11,7 @@ import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.request.DimensionValueReq;
+import com.tencent.supersonic.headless.core.translator.parser.calcite.SemanticModelCompileException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -22,7 +23,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** query controller */
+/**
+ * Chat BI 查询入口。
+ *
+ * <p>职责：解析当前用户并编排搜索、解析和执行接口；已有结构化编译根因时原样抛出，禁止退化为
+ * {@code NO_SELECTED_PARSE} 等泛化错误。
+ */
 @RestController
 @RequestMapping({"/api/chat/query", "/openapi/chat/query"})
 public class ChatQueryController {
@@ -67,6 +73,9 @@ public class ChatQueryController {
         ChatParseResp parseResp = chatQueryService.parse(chatParseReq);
 
         if (CollectionUtils.isEmpty(parseResp.getSelectedParses())) {
+            if (parseResp.getDiagnostic() != null) {
+                throw new SemanticModelCompileException(parseResp.getDiagnostic(), null);
+            }
             throw new InvalidArgumentException("parser error,no selectedParses");
         }
         SemanticParseInfo semanticParseInfo = parseResp.getSelectedParses().get(0);

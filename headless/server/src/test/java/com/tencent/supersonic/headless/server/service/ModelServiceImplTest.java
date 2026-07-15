@@ -17,6 +17,7 @@ import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.server.persistence.dataobject.ModelDO;
 import com.tencent.supersonic.headless.server.persistence.repository.DateInfoRepository;
 import com.tencent.supersonic.headless.server.persistence.repository.ModelRepository;
+import com.tencent.supersonic.headless.server.semantic.diagnostic.SemanticModelValidationService;
 import com.tencent.supersonic.headless.server.service.impl.ModelServiceImpl;
 import com.tencent.supersonic.headless.server.utils.ModelConverter;
 import org.junit.jupiter.api.Assertions;
@@ -78,9 +79,11 @@ class ModelServiceImplTest {
         DataSetService viewService = Mockito.mock(DataSetService.class);
         ModelRelaService modelRelaService = Mockito.mock(ModelRelaService.class);
         ApplicationEventPublisher eventPublisher = Mockito.mock(ApplicationEventPublisher.class);
+        SemanticModelValidationService validationService =
+                Mockito.mock(SemanticModelValidationService.class);
         return new ModelServiceImpl(modelRepository, databaseService, dimensionService,
                 metricService, domainService, userService, viewService, dateInfoRepository,
-                modelRelaService, eventPublisher);
+                modelRelaService, eventPublisher, validationService);
     }
 
     private ModelReq mockModelReq() {

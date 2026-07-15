@@ -257,6 +257,57 @@ export function buildDraftTreeData(draft?: SemanticModelingDraftJson): DataNode[
   if (!draft) {
     return [];
   }
+  if (draft.action === 'EXTEND_EXISTING') {
+    const additions = draft.additions || {};
+    return [
+      {
+        key: 'target-asset-reference',
+        title: `目标资产（只读）· ${draft.targetAsset?.name || '未命名'}`,
+      },
+      {
+        key: 'incremental-additions',
+        title: '本次增量',
+        children: [
+          {
+            key: 'incremental-dimensions',
+            title: `新增维度（${additions.dimensions?.length || 0}）`,
+            children: (additions.dimensions || []).map((item, index) => ({
+              key: `incremental-dimension-${item.key || item.field || index}`,
+              title: item.name || item.field || `维度 ${index + 1}`,
+            })),
+          },
+          {
+            key: 'incremental-metrics',
+            title: `新增指标（${additions.metrics?.length || 0}）`,
+            children: (additions.metrics || []).map((item, index) => ({
+              key: `incremental-metric-${item.key || item.field || index}`,
+              title: item.name || item.field || `指标 ${index + 1}`,
+            })),
+          },
+          {
+            key: 'incremental-terms',
+            title: `新增术语（${additions.terms?.length || 0}）`,
+            children: (additions.terms || []).map((item, index) => ({
+              key: `incremental-term-${item.key || item.name || index}`,
+              title: item.name || `术语 ${index + 1}`,
+            })),
+          },
+          {
+            key: 'incremental-modifications',
+            title: `受控修改（${draft.modifications?.length || 0}）`,
+          },
+          {
+            key: 'incremental-regression-questions',
+            title: `回归问法（${draft.regressionQuestions?.length || 0}）`,
+          },
+        ],
+      },
+      {
+        key: 'incremental-uncertainties',
+        title: `不确定项（${draft.uncertainties?.length || 0}）`,
+      },
+    ];
+  }
   const modelNodes = (draft.models || []).map((model, modelIndex) => {
     const modelKey = `model-${modelIndex}`;
     return {

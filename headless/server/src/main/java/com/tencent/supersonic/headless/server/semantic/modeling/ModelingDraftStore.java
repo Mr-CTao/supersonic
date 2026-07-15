@@ -10,6 +10,7 @@ import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticMod
 import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticModelingDraftDO;
 import com.tencent.supersonic.headless.server.persistence.dataobject.SemanticModelingDraftVersionDO;
 import com.tencent.supersonic.headless.server.persistence.mapper.SemanticGapMapper;
+import com.tencent.supersonic.headless.server.persistence.mapper.SemanticAssetRoutingMapper;
 import com.tencent.supersonic.headless.server.persistence.mapper.SemanticModelingDraftAttemptMapper;
 import com.tencent.supersonic.headless.server.persistence.mapper.SemanticModelingDraftMapper;
 import com.tencent.supersonic.headless.server.persistence.mapper.SemanticModelingDraftVersionMapper;
@@ -39,6 +40,7 @@ public class ModelingDraftStore {
     private final SemanticModelingDraftAttemptMapper attemptMapper;
     private final SemanticModelingDraftVersionMapper versionMapper;
     private final SemanticGapMapper gapMapper;
+    private final SemanticAssetRoutingMapper routingMapper;
     private final ObjectMapper objectMapper;
     private final ModelingDraftRevisionStore revisionStore;
 
@@ -49,17 +51,20 @@ public class ModelingDraftStore {
      * @param attemptMapper 生成尝试 Mapper。
      * @param versionMapper 版本 Mapper。
      * @param gapMapper 缺口 Mapper。
+     * @param routingMapper 资产路由条件消费 Mapper。
      * @param objectMapper JSON 序列化器。
      * @param revisionStore AI 修订租约存储服务。
      */
     public ModelingDraftStore(SemanticModelingDraftMapper draftMapper,
             SemanticModelingDraftAttemptMapper attemptMapper,
             SemanticModelingDraftVersionMapper versionMapper, SemanticGapMapper gapMapper,
-            ObjectMapper objectMapper, ModelingDraftRevisionStore revisionStore) {
+            SemanticAssetRoutingMapper routingMapper, ObjectMapper objectMapper,
+            ModelingDraftRevisionStore revisionStore) {
         this.draftMapper = draftMapper;
         this.attemptMapper = attemptMapper;
         this.versionMapper = versionMapper;
         this.gapMapper = gapMapper;
+        this.routingMapper = routingMapper;
         this.objectMapper = objectMapper;
         this.revisionStore = revisionStore;
     }
@@ -84,6 +89,9 @@ public class ModelingDraftStore {
         SemanticModelingDraftDO replay =
                 draftMapper.selectByIdempotencyKey(user.getName(), idempotencyKey);
         if (replay != null) {
+            // 唯一键只证明“同一操作者使用过该键”，不能证明本次参数相同；必须同时核对
+            // attempt 1 的规范化指纹，避免同键不同请求被误当作安全重放。
+            validateCreationReplay(replay.getId(), requestFingerprint, replay);
             return new CreateResult(replay, true);
         }
 
@@ -110,7 +118,14 @@ public class ModelingDraftStore {
                                     ModelingDraftConstants.STATUS_PENDING_APPROVAL)
                             .last("LIMIT 1"));
             if (active != null) {
-                return new CreateResult(active, true);
+                if (Objects.equals(active.getRouteAnalysisId(), request.getRouteAnalysisId())) {
+                    // Gap 行锁只能防止重复活动草稿；仍需确认本次生成参数与既有 attempt 完全一致。
+                    validateCreationReplay(active.getId(), requestFingerprint, active);
+                    return new CreateResult(active, true);
+                }
+                throw new ModelingDraftException(HttpStatus.CONFLICT,
+                        ModelingDraftConstants.ERROR_CONFLICT,
+                        "当前缺口已有基于其他路由快照的活动草稿");
             }
         }
 
@@ -128,6 +143,11 @@ public class ModelingDraftStore {
         draft.setSelectedTables(writeJson(request.getSelectedTables()));
         draft.setChatModelId(request.getChatModelId());
         draft.setIncludeSample(Boolean.TRUE.equals(request.getIncludeSampleData()));
+        draft.setRouteAnalysisId(request.getRouteAnalysisId());
+        draft.setRouteAction(request.getRouteAction());
+        draft.setRouteTargetAssetType(request.getRouteTargetAssetType());
+        draft.setRouteTargetAssetId(request.getRouteTargetAssetId());
+        draft.setRouteTargetAssetVersion(request.getRouteTargetAssetVersion());
         draft.setIdempotencyKey(idempotencyKey);
         draft.setStatus(ModelingDraftConstants.STATUS_GENERATING);
         draft.setCurrentVersionNo(0);
@@ -138,6 +158,9 @@ public class ModelingDraftStore {
         draft.setUpdatedBy(user.getName());
         draft.setUpdatedAt(now);
         draftMapper.insert(draft);
+
+        // 草稿插入与路由消费必须处于同一事务：任何一侧失败都回滚，避免孤立草稿或永久占用路由。
+        consumeConfirmedRoute(request, draft.getId(), user.getName());
 
         // 主表和 attempt 1 必须同事务提交，避免进程退出后留下无法恢复的 GENERATING 主记录。
         insertAttempt(draft.getId(), 1, ModelingDraftConstants.ATTEMPT_TRIGGER_INITIAL,
@@ -153,6 +176,29 @@ public class ModelingDraftStore {
         return new CreateResult(draft, false);
     }
 
+    /** 使用数据库条件更新原子消费与草稿快照一致的确认路由。 */
+    private void consumeConfirmedRoute(ModelingDraftGenerateReq request, Long draftId,
+            String updatedBy) {
+        int consumed;
+        if (ModelingDraftConstants.ACTION_CREATE_NEW.equals(request.getRouteAction())) {
+            consumed = routingMapper.consumeCreateRoute(request.getRouteAnalysisId(), draftId,
+                    updatedBy);
+        } else if (ModelingDraftConstants.ACTION_EXTEND_EXISTING
+                .equals(request.getRouteAction())) {
+            consumed = routingMapper.consumeExtendRoute(request.getRouteAnalysisId(), draftId,
+                    request.getRouteTargetAssetType(), request.getRouteTargetAssetId(),
+                    request.getRouteTargetAssetVersion(), updatedBy);
+        } else {
+            throw new ModelingDraftException(HttpStatus.CONFLICT,
+                    ModelingDraftConstants.ERROR_CONFLICT, "当前路由动作不允许创建草稿");
+        }
+        if (consumed != 1) {
+            throw new ModelingDraftException(HttpStatus.CONFLICT,
+                    ModelingDraftConstants.ERROR_CONFLICT,
+                    "路由已过期、目标版本变化或已被其他草稿消费，请重新分析");
+        }
+    }
+
     /**
      * 查询幂等键对应草稿，用于唯一键并发冲突后的新事务重放。
      *
@@ -162,6 +208,31 @@ public class ModelingDraftStore {
      */
     public SemanticModelingDraftDO findByIdempotencyKey(String createdBy, String idempotencyKey) {
         return draftMapper.selectByIdempotencyKey(createdBy, idempotencyKey);
+    }
+
+    /**
+     * 校验首次创建的幂等重放必须属于同一草稿且参数指纹完全一致。
+     *
+     * @param draftId 预期重放的草稿 ID。
+     * @param requestFingerprint 本次规范化创建请求指纹。
+     * @param replay 幂等键或 Gap 去重命中的草稿。
+     * @throws ModelingDraftException attempt 缺失、触发类型或请求指纹不一致时抛出冲突。
+     */
+    public void validateCreationReplay(Long draftId, String requestFingerprint,
+            SemanticModelingDraftDO replay) {
+        SemanticModelingDraftAttemptDO initialAttempt = attemptMapper.selectOne(
+                new LambdaQueryWrapper<SemanticModelingDraftAttemptDO>()
+                        .eq(SemanticModelingDraftAttemptDO::getDraftId, draftId)
+                        .eq(SemanticModelingDraftAttemptDO::getAttemptNo, 1));
+        if (replay == null || !Objects.equals(replay.getId(), draftId)
+                || initialAttempt == null
+                || !Objects.equals(initialAttempt.getRequestFingerprint(), requestFingerprint)
+                || !ModelingDraftConstants.ATTEMPT_TRIGGER_INITIAL
+                        .equals(initialAttempt.getTriggerType())) {
+            throw new ModelingDraftException(HttpStatus.CONFLICT,
+                    ModelingDraftConstants.ERROR_IDEMPOTENCY_CONFLICT,
+                    "Idempotency-Key 已用于其他草稿创建请求");
+        }
     }
 
     /**

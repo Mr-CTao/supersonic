@@ -105,6 +105,32 @@ class SemanticGapServiceImplTest {
         assertEquals("semantic gap status changed, please reload", exception.getMessage());
     }
 
+    /** 技术校验失败必须按结构化字段落库，不能退化为业务缺口。 */
+    @Test
+    void shouldPersistStructuredTechnicalDiagnostic() {
+        when(semanticGapMapper.selectOne(any())).thenReturn(null);
+        SemanticGapEventReq event = new SemanticGapEventReq();
+        event.setQuestion("查询库存");
+        event.setFailureType(SemanticGapFailureType.TECHNICAL_VALIDATION_FAILED);
+        event.setDiagnosticStage("MODEL_SQL_COMPILE");
+        event.setErrorCode("MODEL_SQL_PARSE_FAILED");
+        event.setTraceId("trace-safe");
+        event.setErrorLine(1);
+        event.setErrorColumn(45);
+        event.setErrorToken("REGEXP<script>");
+        event.setSuggestion("请改用 RLIKE<script>");
+
+        SemanticGapDO result = service.capture(event);
+
+        assertEquals(SemanticGapFailureType.TECHNICAL_VALIDATION_FAILED.name(),
+                result.getFailureType());
+        assertEquals("MODEL_SQL_PARSE_FAILED", result.getErrorCode());
+        assertEquals("trace-safe", result.getTraceId());
+        assertEquals("REGEXP<script>", result.getErrorToken());
+        assertEquals("请改用 RLIKE<script>", result.getSuggestion());
+        verify(semanticGapMapper).insert(result);
+    }
+
     /** 构造具有指定治理状态的缺口。 */
     private SemanticGapDO newGap(SemanticGapStatus status) {
         SemanticGapDO gap = new SemanticGapDO();

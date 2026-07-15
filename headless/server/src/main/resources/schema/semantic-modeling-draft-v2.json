@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supersonic.tencent.com/schema/semantic-modeling-draft-v2.json",
+  "title": "Semantic Modeling Draft 2.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "action", "routeSummary", "businessGoal", "uncertainties"],
+  "properties": {
+    "schemaVersion": {"const": "2.0"},
+    "action": {"enum": ["CREATE_NEW", "EXTEND_EXISTING"]},
+    "routeSummary": {"$ref": "#/$defs/routeSummary"},
+    "businessGoal": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "targetDomain": {"$ref": "#/$defs/targetDomain"},
+    "models": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/model"}},
+    "terms": {"type": "array", "maxItems": 200, "items": {"$ref": "#/$defs/term"}},
+    "targetAsset": {"$ref": "#/$defs/targetAsset"},
+    "additions": {"$ref": "#/$defs/additions"},
+    "modifications": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {"$ref": "#/$defs/modification"}
+    },
+    "regressionQuestions": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "uncertainties": {
+      "type": "array",
+      "maxItems": 300,
+      "items": {"$ref": "#/$defs/uncertainty"}
+    }
+  },
+  "oneOf": [
+    {
+      "required": ["models", "terms"],
+      "properties": {
+        "action": {"const": "CREATE_NEW"},
+        "models": {"minItems": 1},
+        "targetAsset": {"type": "null"},
+        "additions": {"type": "null"}
+      }
+    },
+    {
+      "required": ["targetAsset", "additions", "modifications", "regressionQuestions"],
+      "properties": {
+        "action": {"const": "EXTEND_EXISTING"},
+        "models": {"maxItems": 0},
+        "terms": {"maxItems": 0}
+      }
+    }
+  ],
+  "$defs": {
+    "key": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"},
+    "nullableString": {"type": ["string", "null"], "maxLength": 2000},
+    "aliases": {
+      "type": "array",
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 128}
+    },
+    "targetDomain": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "domainId": {"type": ["integer", "null"]},
+        "name": {"type": ["string", "null"], "maxLength": 256},
+        "bizName": {"type": ["string", "null"], "maxLength": 256},
+        "description": {"type": ["string", "null"], "maxLength": 2000}
+      }
+    },
+    "routeSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routeAnalysisId", "decisionSource", "explanation", "coveredCapabilities", "missingCapabilities", "queryOperations", "businessAnswers"],
+      "properties": {
+        "routeAnalysisId": {"type": "integer", "minimum": 1},
+        "decisionSource": {"enum": ["RULE_ONLY", "RULE_AND_LLM"]},
+        "explanation": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "coveredCapabilities": {"type": "array", "maxItems": 200, "items": {"type": "string", "maxLength": 256}},
+        "missingCapabilities": {"type": "array", "maxItems": 200, "items": {"type": "string", "maxLength": 256}},
+        "queryOperations": {"type": "array", "maxItems": 30, "items": {"enum": ["ORDER_ASC", "ORDER_DESC", "TOP_N", "PAGINATION", "LIMIT"]}},
+        "businessAnswers": {"type": "object", "maxProperties": 50}
+      }
+    },
+    "targetAsset": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["candidateHandle", "assetType", "name", "baseVersion", "baseTable"],
+      "properties": {
+        "candidateHandle": {"type": "string", "pattern": "^candidate_[1-9][0-9]{0,2}$"},
+        "assetType": {"const": "MODEL"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "baseVersion": {"type": "integer", "minimum": 0},
+        "baseTable": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "bizName", "field", "aliases"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "bizName": {"type": "string", "minLength": 1, "maxLength": 256},
+        "field": {"type": "string", "minLength": 1, "maxLength": 256},
+        "derivation": {"$ref": "#/$defs/derivation"},
+        "description": {"$ref": "#/$defs/nullableString"},
+        "semanticType": {"type": ["string", "null"], "enum": ["DATE", "ID", "CATEGORY", "TEXT", "NUMBER", null]},
+        "aliases": {"$ref": "#/$defs/aliases"}
+      }
+    },
+    "derivation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["operator", "startField", "endType", "unit"],
+      "properties": {
+        "operator": {"const": "DATE_DIFF"},
+        "startField": {"type": "string", "minLength": 1, "maxLength": 256},
+        "endType": {"enum": ["CURRENT_DATE", "FIELD"]},
+        "endField": {"type": ["string", "null"], "maxLength": 256},
+        "unit": {"enum": ["DAY", "HOUR"]}
+      }
+    },
+    "filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "operator", "values"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1, "maxLength": 256},
+        "operator": {"enum": ["EQ", "NE", "GT", "GTE", "LT", "LTE", "IN", "NOT_IN", "BETWEEN", "IS_NULL", "IS_NOT_NULL"]},
+        "values": {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 512}}
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "bizName", "field", "aggregation", "aliases", "filters"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "bizName": {"type": "string", "minLength": 1, "maxLength": 256},
+        "field": {"type": "string", "minLength": 1, "maxLength": 256},
+        "aggregation": {"enum": ["SUM", "COUNT", "COUNT_DISTINCT", "AVG", "MAX", "MIN"]},
+        "expression": {"type": ["string", "null"], "maxLength": 512},
+        "description": {"$ref": "#/$defs/nullableString"},
+        "aliases": {"$ref": "#/$defs/aliases"},
+        "filters": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/filter"}}
+      }
+    },
+    "sensitiveField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "level", "maskingStrategy", "reason"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1, "maxLength": 256},
+        "level": {"enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+        "maskingStrategy": {"enum": ["MASK", "HASH", "REDACT", "NONE"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "bizName", "baseTable", "dimensions", "metrics", "sensitiveFields", "sampleQuestions"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "bizName": {"type": "string", "minLength": 1, "maxLength": 256},
+        "description": {"$ref": "#/$defs/nullableString"},
+        "baseTable": {"type": "string", "minLength": 1, "maxLength": 256},
+        "primaryTimeField": {"type": ["string", "null"], "maxLength": 256},
+        "dimensions": {"type": "array", "maxItems": 300, "items": {"$ref": "#/$defs/dimension"}},
+        "metrics": {"type": "array", "maxItems": 300, "items": {"$ref": "#/$defs/metric"}},
+        "sensitiveFields": {"type": "array", "maxItems": 300, "items": {"$ref": "#/$defs/sensitiveField"}},
+        "sampleQuestions": {"type": "array", "maxItems": 30, "items": {"type": "string", "minLength": 1, "maxLength": 512}}
+      }
+    },
+    "termTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "objectKey"],
+      "properties": {
+        "type": {"enum": ["DIMENSION", "METRIC"]},
+        "objectKey": {"$ref": "#/$defs/key"}
+      }
+    },
+    "term": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "aliases", "targets"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "description": {"$ref": "#/$defs/nullableString"},
+        "aliases": {"$ref": "#/$defs/aliases"},
+        "targets": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/termTarget"}}
+      }
+    },
+    "additions": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["dimensions", "metrics", "terms", "sensitiveFields", "aliases", "sampleQuestions"],
+      "properties": {
+        "dimensions": {"type": "array", "maxItems": 300, "items": {"$ref": "#/$defs/dimension"}},
+        "metrics": {"type": "array", "maxItems": 300, "items": {"$ref": "#/$defs/metric"}},
+        "terms": {"type": "array", "maxItems": 200, "items": {"$ref": "#/$defs/term"}},
+        "sensitiveFields": {"type": "array", "maxItems": 300, "items": {"$ref": "#/$defs/sensitiveField"}},
+        "aliases": {"$ref": "#/$defs/aliases"},
+        "sampleQuestions": {"type": "array", "maxItems": 30, "items": {"type": "string", "minLength": 1, "maxLength": 512}}
+      }
+    },
+    "modification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objectType", "objectKey", "field", "beforeValue", "afterValue", "reason"],
+      "properties": {
+        "objectType": {"enum": ["MODEL", "DIMENSION", "METRIC", "TERM"]},
+        "objectKey": {"type": "string", "minLength": 1, "maxLength": 128},
+        "field": {"enum": ["description", "aliases"]},
+        "beforeValue": {},
+        "afterValue": {},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    },
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "category", "severity", "reason"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "modelKey": {"type": ["string", "null"], "maxLength": 64},
+        "objectKey": {"type": ["string", "null"], "maxLength": 64},
+        "field": {"type": ["string", "null"], "maxLength": 256},
+        "category": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"},
+        "severity": {"enum": ["INFO", "WARNING", "BLOCKING"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    }
+  }
+}

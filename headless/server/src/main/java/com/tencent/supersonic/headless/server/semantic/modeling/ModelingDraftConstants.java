@@ -83,6 +83,9 @@ public final class ModelingDraftConstants {
     public static final String ERROR_INTERNAL = "INTERNAL_ERROR";
 
     public static final String SCHEMA_VERSION = "1.0";
+    public static final String SCHEMA_VERSION_ROUTED = "2.0";
+    public static final String ACTION_CREATE_NEW = "CREATE_NEW";
+    public static final String ACTION_EXTEND_EXISTING = "EXTEND_EXISTING";
     public static final String CONVERSATION_TYPE = "SEMANTIC_MODELING";
 
     /** 结构预检一次最多返回的问题数，避免错误响应和修复 Prompt 无界增长。 */

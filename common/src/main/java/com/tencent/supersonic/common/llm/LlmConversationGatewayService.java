@@ -21,10 +21,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -317,8 +321,11 @@ public class LlmConversationGatewayService {
         LlmModelCapabilityDO capability = getCapability(chatModel.getId(), config);
 
         int nextOrder = nextMessageOrder(conversationId);
+        String persistedContent = Boolean.FALSE.equals(req.getPersistUserContent())
+                ? promptAuditSummary(req.getContent())
+                : req.getContent();
         LlmMessageDO userMessage =
-                saveMessage(conversationId, LlmConstants.ROLE_USER, req.getContent(), null,
+                saveMessage(conversationId, LlmConstants.ROLE_USER, persistedContent, null,
                         resolveContentType(req.getResponseFormat()), null, null, nextOrder);
 
         if (Boolean.TRUE.equals(req.getStream())) {
@@ -451,8 +458,12 @@ public class LlmConversationGatewayService {
      */
     private LlmChatRequest buildAdapterRequest(LlmConversationDO conversation,
             ChatModelConfig config, LlmModelCapabilityDO capability, LlmMessageCreateReq req) {
-        List<LlmChatMessage> messages =
-                listMessages(conversation.getId()).stream().map(this::toChatMessage).toList();
+        List<LlmChatMessage> messages = new ArrayList<>(
+                listMessages(conversation.getId()).stream().map(this::toChatMessage).toList());
+        if (Boolean.FALSE.equals(req.getPersistUserContent()) && !messages.isEmpty()) {
+            // 数据库只保存摘要；仅在当前请求局部内恢复最后一条原文，既能调用 Provider 又不会跨请求留存。
+            messages.get(messages.size() - 1).setContent(req.getContent());
+        }
         return LlmChatRequest.builder().providerType(conversation.getProviderType())
                 .baseUrl(resolveBaseUrl(config))
                 .betaBaseUrl(DeepSeekProviderAdapter.DEFAULT_BETA_BASE_URL)
@@ -462,6 +473,18 @@ public class LlmConversationGatewayService {
                 .maxTokens(req.getMaxTokens()).timeoutMs(resolveTimeoutMs(req, config))
                 .thinkingEnabled(req.getThinkingEnabled()).reasoningEffort(req.getReasoningEffort())
                 .requireToolCalling(req.getRequireToolCalling()).stream(false).build();
+    }
+
+    /** 为不落盘 Prompt 生成不可逆审计摘要，不记录任何原文片段。 */
+    private String promptAuditSummary(String content) {
+        String safeContent = StringUtils.defaultString(content);
+        try {
+            String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(safeContent.getBytes(StandardCharsets.UTF_8)));
+            return "[prompt omitted; sha256=" + digest + "; length=" + safeContent.length() + "]";
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 algorithm is unavailable", exception);
+        }
     }
 
     /**

@@ -342,8 +342,8 @@ public class DeepSeekProviderAdapter implements LlmProviderAdapter {
     /** 构造不包含模型正文的 Provider 响应定位信息。 */
     private String buildSafeResponseReference(String providerRequestId, String finishReason,
             String content) {
-        return "providerRequestId=" + StringUtils.defaultString(providerRequestId, "-")
-                + ", finishReason=" + StringUtils.defaultString(finishReason, "-")
+        return "providerRequestId=" + Objects.toString(providerRequestId, "-")
+                + ", finishReason=" + Objects.toString(finishReason, "-")
                 + ", contentLength=" + StringUtils.length(content);
     }
 

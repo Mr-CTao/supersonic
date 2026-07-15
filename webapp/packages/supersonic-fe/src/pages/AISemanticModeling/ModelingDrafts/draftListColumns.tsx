@@ -22,6 +22,18 @@ const SOURCE_TYPE_TEXT: Record<ModelingDraftSourceType, string> = {
   DATA_SOURCE: '数据源选表',
 };
 
+/** 按服务端持久化动作展示处理方式；无路由引用的历史记录不伪装成新路由结果。 */
+function renderRouteAction(record: ModelingDraftItem) {
+  const action = record.routeAction || record.currentDraft?.action;
+  if (action === 'EXTEND_EXISTING') {
+    return <Tag color="purple">增强</Tag>;
+  }
+  if (action === 'CREATE_NEW' && record.routeAnalysisId) {
+    return <Tag color="blue">新建</Tag>;
+  }
+  return <Tag>历史未路由</Tag>;
+}
+
 const STATUS_TEXT: Record<ModelingDraftStatus, string> = {
   GENERATING: '生成中',
   DRAFT: '草稿',
@@ -109,6 +121,13 @@ export function createDraftListColumns({
       render: (_, record) => (
         <Tag color={STATUS_COLOR[record.status]}>{STATUS_TEXT[record.status]}</Tag>
       ),
+    },
+    {
+      title: '处理方式',
+      dataIndex: 'routeAction',
+      search: false,
+      width: 112,
+      render: (_, record) => renderRouteAction(record),
     },
     {
       title: '数据源',

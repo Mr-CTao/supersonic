@@ -48,6 +48,16 @@ public class SemanticModelingDraftDO {
 
     private Boolean includeSample;
 
+    private Long routeAnalysisId;
+
+    private String routeAction;
+
+    private String routeTargetAssetType;
+
+    private Long routeTargetAssetId;
+
+    private Long routeTargetAssetVersion;
+
     private String idempotencyKey;
 
     private String status;

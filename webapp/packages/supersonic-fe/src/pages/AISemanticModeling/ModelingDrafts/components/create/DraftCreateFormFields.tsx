@@ -16,6 +16,10 @@ const { Text } = Typography;
 type Props = DraftCreationOptions & {
   form: FormInstance<CreateDraftFormValues>;
   initialGapId?: number;
+  onValuesChange?: (
+    changedValues: Partial<CreateDraftFormValues>,
+    values: CreateDraftFormValues,
+  ) => void;
 };
 
 /**
@@ -39,6 +43,7 @@ const DraftCreateFormFields: React.FC<Props> = ({
   loadDatabaseChildren,
   loadDatabaseNames,
   loadTables,
+  onValuesChange,
 }) => (
   <Space orientation="vertical" size={16} style={{ width: '100%' }}>
     {initialGapId ? (
@@ -46,7 +51,7 @@ const DraftCreateFormFields: React.FC<Props> = ({
         showIcon
         type="info"
         title="已带入语义缺口上下文"
-        description="缺口通常不包含完整数据源定位，请确认数据库、参与建模的表和业务目标后再生成。"
+        description="系统会优先判断现有资产能否复用或增强；请先确认数据库、参与分析的表和业务目标。"
       />
     ) : null}
     {capabilities.length === 0 && !initializing ? (
@@ -54,13 +59,14 @@ const DraftCreateFormFields: React.FC<Props> = ({
         showIcon
         type="error"
         title="没有可用的 JSON-capable LLM"
-        description="请先在大模型管理中启用模型并打开 JSON Output 能力，当前页面不会降级为不受约束的文本生成。"
+        description="请先在大模型管理中启用模型并打开 JSON Output 能力；规则证据不足时，页面不会跳过语义比较直接创建草稿。"
       />
     ) : null}
     <Form<CreateDraftFormValues>
       form={form}
       layout="vertical"
       initialValues={{ includeSampleData: false }}
+      onValuesChange={onValuesChange}
     >
       <Form.Item
         label="业务目标"
@@ -152,7 +158,7 @@ const DraftCreateFormFields: React.FC<Props> = ({
         />
       </Form.Item>
       <Form.Item
-        label="生成模型"
+        label="语义建议模型"
         name="chatModelId"
         rules={[{ required: true, message: '请选择支持 JSON Output 的模型' }]}
       >
@@ -175,7 +181,7 @@ const DraftCreateFormFields: React.FC<Props> = ({
         title="样例数据默认关闭"
         description="开启后，每张表最多采样 3 行并由服务端脱敏后进入模型上下文；页面不会展示或保存样例行。若无法确认数据外发边界，请保持关闭。"
       />
-      <Text type="secondary">生成只会写入独立草稿和版本表，不会创建、更新或发布正式语义资产。</Text>
+      <Text type="secondary">分析不会修改正式语义资产；只有确认新建或增强后才会生成独立草稿。</Text>
     </Form>
   </Space>
 );

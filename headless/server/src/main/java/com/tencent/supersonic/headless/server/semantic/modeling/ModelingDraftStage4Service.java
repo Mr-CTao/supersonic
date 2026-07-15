@@ -29,6 +29,7 @@ import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftRev
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftStage4Store.RestoreResult;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftStage4Store.SubmissionResult;
 import com.tencent.supersonic.headless.server.semantic.modeling.ModelingDraftValidator.ValidatedDraft;
+import com.tencent.supersonic.headless.server.semantic.routing.SemanticAssetRoutingService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpStatus;
@@ -83,6 +84,8 @@ public class ModelingDraftStage4Service {
     private final SemanticModelingValidationReportMapper reportMapper;
     private final ModelingDraftContextBuilder contextBuilder;
     private final ModelingDraftValidator validator;
+    private final ModelingDraftRouteGuard routeGuard;
+    private final SemanticAssetRoutingService routingService;
     private final ModelingDraftValidationEngine validationEngine;
     private final ModelingDraftDiffService diffService;
     private final SemanticModelingSensitivityClassifier sensitivityClassifier;
@@ -102,6 +105,8 @@ public class ModelingDraftStage4Service {
      * @param reportMapper 验证报告 Mapper。
      * @param contextBuilder 真实字段和授权名称上下文构建器。
      * @param validator 阶段 3 Schema/字段校验器。
+     * @param routeGuard 已确认路由快照防篡改守卫。
+     * @param routingService 路由权限、目标版本和草稿绑定校验服务。
      * @param validationEngine 阶段 4 确定性验证引擎。
      * @param diffService 版本差异服务。
      * @param sensitivityClassifier 管理员指令和报告文本脱敏器。
@@ -114,6 +119,7 @@ public class ModelingDraftStage4Service {
             SemanticModelingDraftVersionMapper versionMapper,
             SemanticModelingValidationReportMapper reportMapper,
             ModelingDraftContextBuilder contextBuilder, ModelingDraftValidator validator,
+            ModelingDraftRouteGuard routeGuard, SemanticAssetRoutingService routingService,
             ModelingDraftValidationEngine validationEngine, ModelingDraftDiffService diffService,
             SemanticModelingSensitivityClassifier sensitivityClassifier,
             LlmConversationGatewayService gatewayService, SemanticModelingProperties properties,
@@ -125,6 +131,8 @@ public class ModelingDraftStage4Service {
         this.reportMapper = reportMapper;
         this.contextBuilder = contextBuilder;
         this.validator = validator;
+        this.routeGuard = routeGuard;
+        this.routingService = routingService;
         this.validationEngine = validationEngine;
         this.diffService = diffService;
         this.sensitivityClassifier = sensitivityClassifier;
@@ -227,7 +235,8 @@ public class ModelingDraftStage4Service {
             throw new ModelingDraftException(HttpStatus.BAD_REQUEST,
                     ModelingDraftConstants.ERROR_INVALID_REQUEST, "恢复版本参数不完整");
         }
-        permissionService.requireManageable(draftId, user);
+        SemanticModelingDraftDO draft = permissionService.requireManageable(draftId, user);
+        requireCurrentRoute(draft, user);
         RestoreResult result = store.restoreVersion(draftId, targetVersionNo,
                 request.getCurrentVersionNo(), request.getLockVersion(), idempotencyKey,
                 restoreFingerprint(draftId, targetVersionNo, request), user);
@@ -254,6 +263,7 @@ public class ModelingDraftStage4Service {
     public SemanticValidationReportResp validate(Long draftId, ModelingDraftValidationReq request,
             User user) {
         SemanticModelingDraftDO draft = permissionService.requireManageable(draftId, user);
+        requireCurrentRoute(draft, user);
         if (!ModelingDraftConstants.STATUS_DRAFT.equals(draft.getStatus())
                 || !Objects.equals(draft.getCurrentVersionNo(), request.getVersionNo())) {
             throw new ModelingDraftException(HttpStatus.CONFLICT,
@@ -403,7 +413,8 @@ public class ModelingDraftStage4Service {
     public ModelingDraftSubmissionResp submit(Long draftId, ModelingDraftSubmitReq request,
             String idempotencyKey, User user) {
         validateIdempotencyKey(idempotencyKey);
-        permissionService.requireManageable(draftId, user);
+        SemanticModelingDraftDO draft = permissionService.requireManageable(draftId, user);
+        requireCurrentRoute(draft, user);
         SubmissionResult result = store.submit(draftId, request.getVersionNo(),
                 request.getValidationReportId(), idempotencyKey, user);
         SemanticModelingDraftDO submitted = result.draft();
@@ -447,6 +458,7 @@ public class ModelingDraftStage4Service {
             throw new IllegalStateException("Claimed revision attempt must have a persisted id");
         }
         try {
+            requireCurrentRoute(draft, user);
             assertRevisionPreconditions(draft, request);
             List<String> selectedTables = readSelectedTables(draft.getSelectedTables());
             ValidationContext context = contextBuilder.reloadValidationContext(
@@ -526,6 +538,8 @@ public class ModelingDraftStage4Service {
     private ValidatedDraft requestRevision(SemanticModelingDraftDO draft,
             ModelingDraftAiReviseReq request, String idempotencyKey, ValidationContext context) {
         JsonNode protectedDraftSource = readTree(draft.getDraftJson());
+        String schemaVersion = protectedDraftSource.path("schemaVersion")
+                .asText(ModelingDraftConstants.SCHEMA_VERSION);
         SemanticModelingProtectedDraftContext protectedContext =
                 new SemanticModelingProtectedDraftContext(sensitivityClassifier);
         JsonNode protectedDraft = protectedContext.protect(protectedDraftSource);
@@ -534,7 +548,8 @@ public class ModelingDraftStage4Service {
         try {
             response = gatewayService.appendMessageAndChatWithoutTransaction(
                     draft.getLlmConversationId(), createRevisionMessage(prompt,
-                            "semantic-revise-" + draft.getId() + "-" + idempotencyKey));
+                            "semantic-revise-" + draft.getId() + "-" + idempotencyKey,
+                            schemaVersion));
             assertProviderAvailable(response);
         } catch (ModelingDraftException exception) {
             throw exception;
@@ -544,8 +559,8 @@ public class ModelingDraftStage4Service {
         }
 
         try {
-            return validateProtectedCandidate(response, protectedContext, context.columnsByTable(),
-                    context.existingNames());
+            return validateProtectedCandidate(draft, response, protectedContext,
+                    context.columnsByTable(), context.existingNames());
         } catch (ModelingDraftException firstValidationError) {
             String repairPrompt =
                     buildRevisionRepairPrompt(request, firstValidationError, protectedDraft);
@@ -553,7 +568,8 @@ public class ModelingDraftStage4Service {
             try {
                 repair = gatewayService.appendMessageAndChatWithoutTransaction(
                         draft.getLlmConversationId(), createRevisionMessage(repairPrompt,
-                                "semantic-revise-repair-" + draft.getId() + "-" + idempotencyKey));
+                                "semantic-revise-repair-" + draft.getId() + "-" + idempotencyKey,
+                                schemaVersion));
                 assertProviderAvailable(repair);
             } catch (ModelingDraftException exception) {
                 throw exception;
@@ -562,7 +578,7 @@ public class ModelingDraftStage4Service {
                         ModelingDraftConstants.ERROR_REVISION_FAILED, "AI 修订输出修复失败，请稍后重试");
             }
             try {
-                return validateProtectedCandidate(repair, protectedContext,
+                return validateProtectedCandidate(draft, repair, protectedContext,
                         context.columnsByTable(), context.existingNames());
             } catch (ModelingDraftException repairValidationError) {
                 throw new ModelingDraftException(HttpStatus.UNPROCESSABLE_ENTITY,
@@ -573,12 +589,17 @@ public class ModelingDraftStage4Service {
     }
 
     /** 模型输出必须先恢复受保护字段，再进入 schema、业务校验、diff 和持久化链路。 */
-    private ValidatedDraft validateProtectedCandidate(LlmMessageCreateResp response,
+    private ValidatedDraft validateProtectedCandidate(SemanticModelingDraftDO draft,
+            LlmMessageCreateResp response,
             SemanticModelingProtectedDraftContext protectedContext,
             Map<String, List<DBColumn>> columnsByTable, Set<String> existingNames) {
         JsonNode candidate = readTree(extractCandidate(response));
         JsonNode restored = protectedContext.restore(candidate);
-        return validator.validateAndNormalize(writeJson(restored), columnsByTable, existingNames);
+        ValidatedDraft validated =
+                validator.validateAndNormalize(writeJson(restored), columnsByTable, existingNames);
+        // AI 修订只能调整增量建模内容，不能改写人工确认的动作、目标版本或业务口径。
+        routeGuard.validateMutation(draft, draft.getDraftJson(), validated.payload());
+        return validated;
     }
 
     /** 构造完整草稿修订 Prompt，明确禁止修改无关对象或返回局部补丁。 */
@@ -620,11 +641,12 @@ public class ModelingDraftStage4Service {
     }
 
     /** 构造固定 JSON Schema 的非流式修订请求。 */
-    private LlmMessageCreateReq createRevisionMessage(String content, String idempotencyKey) {
+    private LlmMessageCreateReq createRevisionMessage(String content, String idempotencyKey,
+            String schemaVersion) {
         LlmMessageCreateReq message = new LlmMessageCreateReq();
         message.setContent(content);
         message.setResponseFormat(LlmConstants.FORMAT_JSON);
-        message.setJsonSchema(validator.getJsonSchema());
+        message.setJsonSchema(validator.getJsonSchema(schemaVersion));
         message.setTemperature(0.1D);
         message.setMaxTokens(properties.getMaxOutputTokens());
         // 租约按最多两轮该超时加安全余量计算，合法 Provider 调用不会在执行中失去互斥权。
@@ -838,6 +860,13 @@ public class ModelingDraftStage4Service {
                 .canSubmit(canSubmit).submissionBlockReason(blockReason)
                 .createdBy(report.getCreatedBy()).createdAt(report.getCreatedAt())
                 .finishedAt(report.getFinishedAt()).build();
+    }
+
+    /** 对路由草稿重新校验目标权限、语义版本与消费绑定；历史 1.0 草稿保持兼容。 */
+    private void requireCurrentRoute(SemanticModelingDraftDO draft, User user) {
+        if (draft.getRouteAnalysisId() != null) {
+            routingService.requireBoundRoute(draft.getRouteAnalysisId(), draft.getId(), user);
+        }
     }
 
     /** 查询不可变版本。 */

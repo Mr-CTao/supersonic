@@ -312,6 +312,16 @@ public class SemanticGapServiceImpl implements SemanticGapService {
         LambdaQueryWrapper<SemanticGapDO> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SemanticGapDO::getNormalizedQuestion, normalizedQuestion)
                 .eq(SemanticGapDO::getFailureType, failureType);
+        if (StringUtils.isBlank(eventReq.getErrorCode())) {
+            wrapper.isNull(SemanticGapDO::getErrorCode);
+        } else {
+            wrapper.eq(SemanticGapDO::getErrorCode, eventReq.getErrorCode());
+        }
+        if (StringUtils.isBlank(eventReq.getMatchedModelIds())) {
+            wrapper.isNull(SemanticGapDO::getMatchedModelIds);
+        } else {
+            wrapper.eq(SemanticGapDO::getMatchedModelIds, eventReq.getMatchedModelIds());
+        }
         if (eventReq.getAssistantId() == null) {
             wrapper.isNull(SemanticGapDO::getAssistantId);
         } else {
@@ -358,6 +368,13 @@ public class SemanticGapServiceImpl implements SemanticGapService {
         gap.setSourceQueryId(eventReq.getQueryId());
         gap.setSourceChatId(eventReq.getChatId());
         gap.setRecentQuestions(gap.getQuestion());
+        gap.setDiagnosticStage(truncate(eventReq.getDiagnosticStage(), 64));
+        gap.setErrorCode(truncate(eventReq.getErrorCode(), 64));
+        gap.setTraceId(truncate(eventReq.getTraceId(), 64));
+        gap.setErrorLine(eventReq.getErrorLine());
+        gap.setErrorColumn(eventReq.getErrorColumn());
+        gap.setErrorToken(truncate(sanitizeText(eventReq.getErrorToken()), 128));
+        gap.setSuggestion(truncate(sanitizeText(eventReq.getSuggestion()), 1000));
         semanticGapMapper.insert(gap);
         return gap;
     }
@@ -390,6 +407,20 @@ public class SemanticGapServiceImpl implements SemanticGapService {
         current.setRecentQuestions(
                 appendRecentQuestion(current.getRecentQuestions(), eventReq.getQuestion()));
         current.setPriorityScore(calculatePriority(current));
+        current.setDiagnosticStage(firstNonBlank(current.getDiagnosticStage(),
+                truncate(eventReq.getDiagnosticStage(), 64)));
+        current.setErrorCode(
+                firstNonBlank(current.getErrorCode(), truncate(eventReq.getErrorCode(), 64)));
+        current.setTraceId(
+                firstNonBlank(current.getTraceId(), truncate(eventReq.getTraceId(), 64)));
+        current.setErrorLine(
+                current.getErrorLine() == null ? eventReq.getErrorLine() : current.getErrorLine());
+        current.setErrorColumn(current.getErrorColumn() == null ? eventReq.getErrorColumn()
+                : current.getErrorColumn());
+        current.setErrorToken(firstNonBlank(current.getErrorToken(),
+                truncate(sanitizeText(eventReq.getErrorToken()), 128)));
+        current.setSuggestion(firstNonBlank(current.getSuggestion(),
+                truncate(sanitizeText(eventReq.getSuggestion()), 1000)));
         // 只更新统计和诊断列，刻意不携带 status/ignoreReason。这样阶段 3 的行锁状态流转
         // 即使与采集并发，也不会在 PostgreSQL 等待锁后被旧实体中的状态覆盖。
         LambdaUpdateWrapper<SemanticGapDO> update = new LambdaUpdateWrapper<>();
@@ -412,6 +443,13 @@ public class SemanticGapServiceImpl implements SemanticGapService {
                         current.getSourceChatId())
                 .set(SemanticGapDO::getRecentQuestions, current.getRecentQuestions())
                 .set(SemanticGapDO::getPriorityScore, current.getPriorityScore());
+        update.set(SemanticGapDO::getDiagnosticStage, current.getDiagnosticStage())
+                .set(SemanticGapDO::getErrorCode, current.getErrorCode())
+                .set(SemanticGapDO::getTraceId, current.getTraceId())
+                .set(SemanticGapDO::getErrorLine, current.getErrorLine())
+                .set(SemanticGapDO::getErrorColumn, current.getErrorColumn())
+                .set(SemanticGapDO::getErrorToken, current.getErrorToken())
+                .set(SemanticGapDO::getSuggestion, current.getSuggestion());
         semanticGapMapper.update(null, update);
         return semanticGapMapper.selectById(current.getId());
     }
@@ -435,8 +473,9 @@ public class SemanticGapServiceImpl implements SemanticGapService {
     /** 构造并发锁 key，锁粒度与聚合维度保持一致。 */
     private String buildAggregationKey(SemanticGapEventReq eventReq, String normalizedQuestion,
             String failureType) {
-        return String.format("%s|%s|%s|%s", eventReq.getAssistantId(), eventReq.getDomainId(),
-                failureType, normalizedQuestion);
+        return String.format("%s|%s|%s|%s|%s|%s", eventReq.getAssistantId(), eventReq.getDomainId(),
+                failureType, eventReq.getErrorCode(), eventReq.getMatchedModelIds(),
+                normalizedQuestion);
     }
 
     /** 从固定锁数组选择锁段，避免为每个用户问题无限创建锁对象。 */
@@ -458,6 +497,9 @@ public class SemanticGapServiceImpl implements SemanticGapService {
                 || SemanticGapFailureType.PARSER_EXCEPTION.name().equals(failureType)
                 || SemanticGapFailureType.SQL_EXECUTION_ERROR.name().equals(failureType)) {
             return 30;
+        }
+        if (SemanticGapFailureType.TECHNICAL_VALIDATION_FAILED.name().equals(failureType)) {
+            return 35;
         }
         if (SemanticGapFailureType.USER_NEGATIVE_FEEDBACK.name().equals(failureType)) {
             return 25;

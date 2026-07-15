@@ -31,6 +31,9 @@ export type SemanticGapFailureType =
   | 'EMPTY_RESULT_SUSPECTED'
   | 'USER_NEGATIVE_FEEDBACK'
   | 'FALLBACK_TO_LLM_SQL'
+  | 'BUSINESS_DEFINITION_UNCERTAIN'
+  | 'SEMANTIC_ASSET_MISSING'
+  | 'TECHNICAL_VALIDATION_FAILED'
   | 'UNKNOWN';
 
 export type SemanticGapItem = {
@@ -62,6 +65,13 @@ export type SemanticGapItem = {
   sourceQueryId?: number;
   sourceChatId?: number;
   recentQuestions?: string;
+  diagnosticStage?: string;
+  errorCode?: string;
+  traceId?: string;
+  errorLine?: number;
+  errorColumn?: number;
+  errorToken?: string;
+  suggestion?: string;
 };
 
 export type SemanticGapQueryParams = {

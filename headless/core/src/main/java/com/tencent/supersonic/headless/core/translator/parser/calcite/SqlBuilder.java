@@ -34,6 +34,12 @@ import org.jgrapht.graph.DefaultUndirectedGraph;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * 将语义模型定义渲染为 Calcite 可执行关系结构。
+ *
+ * <p>职责：构造模型、字段和关联节点；模型 SQL 编译失败时必须抛出结构化异常，禁止返回半初始化
+ * TableView。实例仅在单次翻译中使用，不共享可变状态，无需额外并发锁。
+ */
 @Slf4j
 public class SqlBuilder {
 
@@ -337,13 +343,28 @@ public class SqlBuilder {
             queryDimensions.stream().forEach(d -> queryFields.addAll(d.getFields()));
         }
 
-        try {
-            for (String field : queryFields) {
+        for (String field : queryFields) {
+            try {
                 tableView.getSelect().add(SemanticNode.parse(field, scope, engineType));
+            } catch (Exception exception) {
+                // 字段表达式失败必须保留为结构化根因，不能继续构造缺少 select 的半成品。
+                SemanticModelCompileException compileException = SemanticModelCompiler.wrap(
+                        exception,
+                        com.tencent.supersonic.headless.api.pojo.response.SemanticDiagnosticStage.METRIC_EXPRESSION_COMPILE,
+                        com.tencent.supersonic.headless.api.pojo.response.SemanticDiagnosticCode.METRIC_EXPRESSION_INVALID,
+                        engineType, dataModel.getId(), dataModel.getName(), null);
+                log.error("Failed to compile expression for model id={}, name={}",
+                        dataModel.getId(), dataModel.getName(), compileException);
+                throw compileException;
             }
-            tableView.setTable(DataModelNode.build(dataModel, scope));
-        } catch (Exception e) {
-            log.error("Failed to create sqlNode for data model {}", dataModel);
+        }
+        try {
+            tableView.setTable(SemanticModelCompiler.compileModel(dataModel, scope, null));
+        } catch (SemanticModelCompileException exception) {
+            // 只记录模型 ID/名称和堆栈；禁止把包含完整 SQL 的 ModelResp 写入日志。
+            log.error("Failed to compile model SQL for model id={}, name={}", dataModel.getId(),
+                    dataModel.getName(), exception);
+            throw exception;
         }
 
         return tableView;
