@@ -387,9 +387,10 @@ const AgentForm: React.FC<Props> = ({ editAgent, onSaveAgent, onCreateToolBtnCli
       onValuesChange={(value, values) => {
         setFormData(values);
       }}
-      className={globalStyles.supersonicForm}
+      className={`${globalStyles.supersonicForm} ${styles.agentConfigForm}`}
     >
       <Tabs
+        className={styles.agentConfigTabs}
         tabBarExtraContent={
           <Space>
             {activeKey !== 'memory' && activeKey !== 'permissonSetting' && (

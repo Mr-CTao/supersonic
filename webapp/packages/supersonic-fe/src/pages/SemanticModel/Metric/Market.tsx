@@ -1,6 +1,11 @@
+/**
+ * 指标市场页面模块。
+ *
+ * 负责指标筛选、服务端分页、批量操作和表格展示，并统一处理分页序号、自适应高度与单行省略样式。
+ */
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
-import { message, Space, Popconfirm, Spin } from 'antd';
+import { message, Space, Popconfirm, Spin, Tag, Tooltip } from 'antd';
 import MetricAddClass from './components/MetricAddClass';
 import React, { useRef, useState, useEffect } from 'react';
 import { history, useModel } from '@umijs/max';
@@ -32,6 +37,37 @@ type QueryMetricListParams = {
   sensitiveLevel?: string;
   type?: string;
   [key: string]: any;
+};
+
+// 将分类或别名拆成独立标签，并去除接口数据中的空值和重复项。
+const renderTagList = (values: string[], color?: string) => {
+  const uniqueValues = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+  if (uniqueValues.length === 0) {
+    return '-';
+  }
+  return (
+    <Tooltip
+      placement="top"
+      trigger={['hover', 'focus']}
+      title={
+        <div className={styles.metricTagTooltip}>
+          {uniqueValues.map((value) => (
+            <Tag key={value} color={color}>
+              {value}
+            </Tag>
+          ))}
+        </div>
+      }
+    >
+      <div className={styles.metricTagList} tabIndex={0}>
+        {uniqueValues.map((value) => (
+          <Tag key={value} color={color}>
+            {value}
+          </Tag>
+        ))}
+      </div>
+    </Tooltip>
+  );
 };
 
 const ClassMetricTable: React.FC<Props> = ({}) => {
@@ -174,11 +210,12 @@ const ClassMetricTable: React.FC<Props> = ({}) => {
 
   const columns: ProColumns[] = [
     {
-      dataIndex: 'id',
-      title: 'ID',
+      dataIndex: 'sequence',
+      title: '序号',
       width: 80,
       fixed: 'left',
       search: false,
+      render: (_, __, index) => (pagination.current - 1) * pagination.pageSize + index + 1,
     },
     {
       dataIndex: 'name',
@@ -186,6 +223,22 @@ const ClassMetricTable: React.FC<Props> = ({}) => {
       width: 280,
       fixed: 'left',
       render: columnsConfig.indicatorInfo.render,
+    },
+    {
+      dataIndex: 'classifications',
+      title: '分类',
+      width: 180,
+      search: false,
+      ellipsis: false,
+      render: (_, record) => renderTagList(record.classifications || [], 'blue'),
+    },
+    {
+      dataIndex: 'alias',
+      title: '别名',
+      width: 240,
+      search: false,
+      ellipsis: false,
+      render: (_, record) => renderTagList(record.alias?.split(',') || []),
     },
     {
       dataIndex: 'sensitiveLevel',
@@ -205,7 +258,8 @@ const ClassMetricTable: React.FC<Props> = ({}) => {
       title: '状态',
       width: 180,
       search: false,
-      render: columnsConfig.state.render,
+      // 显式传递原始状态值，避免 ProTable 的省略包装改变 render 首参语义。
+      render: (_, record) => columnsConfig.state.render(record.status),
     },
     {
       dataIndex: 'createdBy',
@@ -281,7 +335,11 @@ const ClassMetricTable: React.FC<Props> = ({}) => {
         }
       },
     },
-  ];
+  ].map((column) => ({
+    ...column,
+    align: 'center',
+    ellipsis: column.ellipsis ?? true,
+  }));
 
   const handleFilterChange = async (filterParams: {
     key: string;
@@ -344,7 +402,7 @@ const ClassMetricTable: React.FC<Props> = ({}) => {
   };
 
   return (
-    <>
+    <div className={styles.metricMarket}>
       <div className={styles.metricFilterWrapper}>
         <MetricFilter
           initFilterValues={filterParams}
@@ -400,7 +458,7 @@ const ClassMetricTable: React.FC<Props> = ({}) => {
             columns={columns}
             pagination={pagination}
             size="large"
-            scroll={{ x: 1500 }}
+            scroll={{ x: 1920, y: '100%' }}
             tableAlertRender={() => {
               return false;
             }}
@@ -452,7 +510,7 @@ const ClassMetricTable: React.FC<Props> = ({}) => {
           }}
         />
       )}
-    </>
+    </div>
   );
 };
 export default ClassMetricTable;

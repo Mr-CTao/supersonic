@@ -47,6 +47,7 @@ import type { TabsProps } from 'antd';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import LlmSettingModal from './LlmSettingModal';
+import styles from './style.less';
 import { ISemantic } from '../../data';
 import { deleteLlmConfig } from '../../service';
 import { getLlmList, testLLMConn } from '@/services/system';
@@ -60,16 +61,48 @@ import {
   sendLlmConversationMessage,
   updateLlmCapability,
 } from '@/services/llmGateway';
-import type {
-  LlmInvocationLogQueryReq,
-  LlmModelCapability,
-} from '@/services/llmGateway';
+import type { LlmInvocationLogQueryReq, LlmModelCapability } from '@/services/llmGateway';
 
 const { Text, Paragraph } = Typography;
 const DEFAULT_BETA_BASE_URL = 'https://api.deepseek.com/beta';
-const DEFAULT_SYSTEM_PROMPT = '你是 LLM Conversation Gateway 调试助手，请优先输出简洁、可验证的回答。';
+const DEFAULT_SYSTEM_PROMPT =
+  '你是 LLM Conversation Gateway 调试助手，请优先输出简洁、可验证的回答。';
 
 type GatewayTabKey = 'connections' | 'capabilities' | 'debug' | 'logs';
+
+type TablePaginationState = {
+  current: number;
+  pageSize: number;
+};
+
+/**
+ * 将业务列统一转换为居中、单行省略的表格列。
+ *
+ * @param columns 保留原有渲染器、搜索配置和列宽的业务列集合。
+ * @returns 应用统一对齐与省略规则后的新列集合。
+ * @throws 不主动抛出异常；调用方必须传入有效列数组。
+ */
+const normalizeTableColumns = <T extends Record<string, any>>(
+  columns: ProColumns<T>[],
+): ProColumns<T>[] => {
+  return columns.map((column) => ({
+    ...column,
+    align: 'center',
+    ellipsis: column.valueType === 'option' ? false : column.ellipsis ?? true,
+  }));
+};
+
+/**
+ * 计算跨分页连续展示的序号。
+ *
+ * @param index 当前页内从 0 开始的行索引。
+ * @param pagination 当前分页状态。
+ * @returns 当前记录在完整结果集中的从 1 开始序号。
+ * @throws 不主动抛出异常；分页状态由受控 Pagination 保证为正数。
+ */
+const getSequenceNumber = (index: number, pagination: TablePaginationState) => {
+  return (pagination.current - 1) * pagination.pageSize + index + 1;
+};
 
 type LlmMessage = {
   id?: number;
@@ -138,7 +171,9 @@ const unwrapData = (response: any) => {
  * @returns 成功返回 true。
  */
 const isSuccessResponse = (response: any) => {
-  return !response || !Object.prototype.hasOwnProperty.call(response, 'code') || response.code === 200;
+  return (
+    !response || !Object.prototype.hasOwnProperty.call(response, 'code') || response.code === 200
+  );
 };
 
 /**
@@ -426,12 +461,7 @@ const renderAssistantDebugContent = (turn: LlmDebugTurn) => {
         </pre>
       )}
       {turn.errorMessage && turn.content && (
-        <Alert
-          showIcon
-          type="error"
-          style={{ marginTop: 10 }}
-          title={turn.errorMessage}
-        />
+        <Alert showIcon type="error" style={{ marginTop: 10 }} title={turn.errorMessage} />
       )}
     </div>
   );
@@ -593,8 +623,9 @@ const LlmTable: React.FC = () => {
   ];
 
   return (
-    <div style={{ margin: 20 }}>
+    <div className={styles.llmPage}>
       <Tabs
+        className={styles.llmTabs}
         activeKey={activeKey}
         onChange={(key) => setActiveKey(key as GatewayTabKey)}
         items={tabItems}
@@ -642,6 +673,10 @@ const ConnectionConfigTab: React.FC<ConnectionConfigTabProps> = ({
   onOpenTab,
 }) => {
   const [testingId, setTestingId] = useState<number>();
+  const [pagination, setPagination] = useState<TablePaginationState>({
+    current: 1,
+    pageSize: 20,
+  });
 
   // 操作列连接测试使用 loading 文案锁定单条记录，避免连续点击打出重复探测请求。
   const handleTestConnection = async (record: ISemantic.ILlmItem) => {
@@ -660,9 +695,15 @@ const ConnectionConfigTab: React.FC<ConnectionConfigTabProps> = ({
     }
   };
 
-  const columns: ProColumns<ISemantic.ILlmItem>[] = [
-    { dataIndex: 'id', title: 'ID', width: 72 },
-    { dataIndex: 'name', title: '连接名称', ellipsis: true },
+  const columns = normalizeTableColumns<ISemantic.ILlmItem>([
+    {
+      dataIndex: 'sequence',
+      title: '序号',
+      width: 80,
+      search: false,
+      render: (_, __, index) => getSequenceNumber(index, pagination),
+    },
+    { dataIndex: 'name', title: '连接名称', width: 180 },
     {
       dataIndex: ['config', 'provider'],
       title: '供应商',
@@ -678,18 +719,18 @@ const ConnectionConfigTab: React.FC<ConnectionConfigTabProps> = ({
       dataIndex: ['config', 'modelName'],
       title: '模型名称',
       search: false,
-      ellipsis: true,
+      width: 160,
     },
     {
       dataIndex: ['config', 'baseUrl'],
       title: 'API Base URL',
       search: false,
-      ellipsis: true,
+      width: 210,
     },
     {
       title: 'Beta Base URL',
       search: false,
-      ellipsis: true,
+      width: 210,
       render: (_, record) => (isDeepSeekModel(record) ? DEFAULT_BETA_BASE_URL : '-'),
     },
     {
@@ -700,7 +741,7 @@ const ConnectionConfigTab: React.FC<ConnectionConfigTabProps> = ({
         const capability =
           capabilityByModel[`${record.id}-${record.config?.modelName || ''}`] || {};
         return (
-          <Space size={[0, 4]} wrap>
+          <Space size={4}>
             {capability.supportJsonMode && <Tag color="green">JSON</Tag>}
             {capability.supportStream && <Tag color="cyan">Stream</Tag>}
             {capability.supportThinking && <Tag color="blue">Thinking</Tag>}
@@ -727,7 +768,11 @@ const ConnectionConfigTab: React.FC<ConnectionConfigTabProps> = ({
       title: '更新时间',
       width: 170,
       search: false,
-      render: (value: any) => (value && value !== '-' ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'),
+      // ProTable 在不同版本中可能先把 value 转为 ReactNode，直接读取 record 可避免出现 Invalid Date。
+      render: (_, record) =>
+        record.updatedAt && record.updatedAt !== '-'
+          ? dayjs(record.updatedAt).format('YYYY-MM-DD HH:mm:ss')
+          : '-',
     },
     {
       dataIndex: 'createdBy',
@@ -738,7 +783,7 @@ const ConnectionConfigTab: React.FC<ConnectionConfigTabProps> = ({
     {
       title: '操作',
       valueType: 'option',
-      width: 220,
+      width: 280,
       fixed: 'right',
       render: (_, record) => (
         <Space size={8} style={{ whiteSpace: 'nowrap' }}>
@@ -768,18 +813,25 @@ const ConnectionConfigTab: React.FC<ConnectionConfigTabProps> = ({
         </Space>
       ),
     },
-  ];
+  ]);
 
   return (
     <ProTable<ISemantic.ILlmItem>
+      className={styles.llmDataTable}
       rowKey="id"
       columns={columns}
       dataSource={llmList}
       loading={loading}
       search={false}
-      scroll={{ x: 1500 }}
+      scroll={{ x: 1860, y: '100%' }}
       tableAlertRender={false}
       size="small"
+      pagination={{
+        current: pagination.current,
+        pageSize: pagination.pageSize,
+        showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条/总共 ${total} 条`,
+        onChange: (current, pageSize) => setPagination({ current, pageSize }),
+      }}
       options={{ reload: onRefresh, density: false, fullScreen: false }}
       toolBarRender={() => [
         <Button key="create" type="primary" onClick={onCreate}>
@@ -805,6 +857,10 @@ type CapabilityTabProps = {
 const CapabilityTab: React.FC<CapabilityTabProps> = ({ llmList, capabilities, onRefresh }) => {
   const [editing, setEditing] = useState<LlmModelCapability>();
   const [saveLoading, setSaveLoading] = useState<boolean>(false);
+  const [pagination, setPagination] = useState<TablePaginationState>({
+    current: 1,
+    pageSize: 20,
+  });
   const [form] = Form.useForm();
 
   // 打开抽屉时同步当前行数据，关闭后由 destroyOnHidden 清理表单 DOM。
@@ -847,10 +903,16 @@ const CapabilityTab: React.FC<CapabilityTabProps> = ({ llmList, capabilities, on
         enabled: true,
       }));
 
-  const columns: ProColumns<LlmModelCapability>[] = [
-    { dataIndex: 'chatModelId', title: '连接 ID', width: 90 },
+  const columns = normalizeTableColumns<LlmModelCapability>([
+    {
+      dataIndex: 'sequence',
+      title: '序号',
+      width: 80,
+      search: false,
+      render: (_, __, index) => getSequenceNumber(index, pagination),
+    },
     { dataIndex: 'providerType', title: '供应商', width: 120 },
-    { dataIndex: 'modelName', title: '模型名称', ellipsis: true },
+    { dataIndex: 'modelName', title: '模型名称', width: 180 },
     { dataIndex: 'maxContextTokens', title: '最大上下文', width: 120, search: false },
     {
       dataIndex: 'supportStream',
@@ -905,7 +967,7 @@ const CapabilityTab: React.FC<CapabilityTabProps> = ({ llmList, capabilities, on
     {
       dataIndex: 'usageScene',
       title: '适用场景',
-      ellipsis: true,
+      width: 180,
       search: false,
     },
     {
@@ -918,24 +980,31 @@ const CapabilityTab: React.FC<CapabilityTabProps> = ({ llmList, capabilities, on
         </a>
       ),
     },
-  ];
+  ]);
 
   return (
-    <>
+    <div className={styles.llmTableTab}>
       <Alert
+        className={styles.capabilityAlert}
         showIcon
         type="info"
-        style={{ marginBottom: 12 }}
         title="DeepSeek 的对话前缀续写、FIM 补全和 strict tool calling 属于 Beta 能力，需要使用独立 Beta Base URL，不能覆盖普通 /chat/completions。"
       />
       <ProTable<LlmModelCapability>
+        className={styles.llmDataTable}
         rowKey={(record) => `${record.chatModelId}-${record.modelName}`}
         columns={columns}
         dataSource={dataSource}
         search={false}
-        scroll={{ x: 1500 }}
+        scroll={{ x: 1660, y: '100%' }}
         tableAlertRender={false}
         size="small"
+        pagination={{
+          current: pagination.current,
+          pageSize: pagination.pageSize,
+          showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条/总共 ${total} 条`,
+          onChange: (current, pageSize) => setPagination({ current, pageSize }),
+        }}
         options={{ reload: onRefresh, density: false, fullScreen: false }}
       />
       <Drawer
@@ -996,7 +1065,7 @@ const CapabilityTab: React.FC<CapabilityTabProps> = ({ llmList, capabilities, on
           </Form.Item>
         </Form>
       </Drawer>
-    </>
+    </div>
   );
 };
 
@@ -1218,7 +1287,11 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
             <Form.Item name="reasoningEffort" hidden>
               <Input />
             </Form.Item>
-            <Form.Item name="chatModelId" label="连接" rules={[{ required: true, message: '请选择连接' }]}>
+            <Form.Item
+              name="chatModelId"
+              label="连接"
+              rules={[{ required: true, message: '请选择连接' }]}
+            >
               <Select
                 placeholder="选择 DeepSeek 连接"
                 options={llmList.map((item) => ({
@@ -1283,7 +1356,9 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
               <Text>Messages：{conversationMessages.length}</Text>
               <Text>
                 估算 Token：
-                {conversationMessages.reduce((sum, item) => sum + Math.max(1, (item.content || '').length / 4), 0).toFixed(0)}
+                {conversationMessages
+                  .reduce((sum, item) => sum + Math.max(1, (item.content || '').length / 4), 0)
+                  .toFixed(0)}
               </Text>
             </Space>
             <Tooltip title="清空会话">
@@ -1354,7 +1429,9 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
                         paddingInline: 12,
                       }}
                     >
-                      {selectedConnection?.name || selectedConnection?.config?.provider || 'Gateway'}
+                      {selectedConnection?.name ||
+                        selectedConnection?.config?.provider ||
+                        'Gateway'}
                     </Tag>
                     <Dropdown
                       trigger={['click']}
@@ -1368,10 +1445,7 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
                         onClick: ({ key }) => updateDebugOption('responseFormat', key),
                       }}
                     >
-                      <Button
-                        icon={<CodeOutlined />}
-                        style={debugSenderFooterButtonStyle}
-                      >
+                      <Button icon={<CodeOutlined />} style={debugSenderFooterButtonStyle}>
                         {getResponseFormatLabel(watchedResponseFormat)}
                         <DownOutlined style={{ fontSize: 12 }} />
                       </Button>
@@ -1388,7 +1462,11 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
                       }}
                     />
                     <Tooltip
-                      title={watchedThinkingEnabled ? 'Reasoning Effort' : '开启 Thinking 后可调整 Reasoning Effort'}
+                      title={
+                        watchedThinkingEnabled
+                          ? 'Reasoning Effort'
+                          : '开启 Thinking 后可调整 Reasoning Effort'
+                      }
                     >
                       <span>
                         <Dropdown
@@ -1488,8 +1566,19 @@ const InvocationLogTab: React.FC<InvocationLogTabProps> = ({ llmList }) => {
   const actionRef = useRef<ActionType>();
   const [detail, setDetail] = useState<InvocationLogItem>();
   const [detailOpen, setDetailOpen] = useState<boolean>(false);
+  const [pagination, setPagination] = useState<TablePaginationState>({
+    current: 1,
+    pageSize: 20,
+  });
 
-  const columns: ProColumns<InvocationLogItem>[] = [
+  const columns = normalizeTableColumns<InvocationLogItem>([
+    {
+      dataIndex: 'sequence',
+      title: '序号',
+      width: 80,
+      search: false,
+      render: (_, __, index) => getSequenceNumber(index, pagination),
+    },
     {
       dataIndex: 'providerType',
       title: '供应商',
@@ -1506,11 +1595,11 @@ const InvocationLogTab: React.FC<InvocationLogTabProps> = ({ llmList }) => {
       valueType: 'select',
       fieldProps: {
         showSearch: true,
-        options: Array.from(new Set(llmList.map((item) => item.config?.modelName).filter(Boolean))).map(
-          (modelName) => ({ label: modelName, value: modelName }),
-        ),
+        options: Array.from(
+          new Set(llmList.map((item) => item.config?.modelName).filter(Boolean)),
+        ).map((modelName) => ({ label: modelName, value: modelName })),
       },
-      ellipsis: true,
+      width: 160,
     },
     {
       dataIndex: 'status',
@@ -1582,17 +1671,24 @@ const InvocationLogTab: React.FC<InvocationLogTabProps> = ({ llmList }) => {
         </a>
       ),
     },
-  ];
+  ]);
 
   return (
-    <>
+    <div className={styles.llmTableTab}>
       <ProTable<InvocationLogItem>
+        className={styles.llmDataTable}
         actionRef={actionRef}
         rowKey="id"
         columns={columns}
-        scroll={{ x: 1500 }}
+        scroll={{ x: 1600, y: '100%' }}
         tableAlertRender={false}
         size="small"
+        pagination={{
+          current: pagination.current,
+          pageSize: pagination.pageSize,
+          showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条/总共 ${total} 条`,
+          onChange: (current, pageSize) => setPagination({ current, pageSize }),
+        }}
         options={{ density: false, fullScreen: false }}
         request={async (params) => {
           const query: LlmInvocationLogQueryReq = {
@@ -1628,7 +1724,9 @@ const InvocationLogTab: React.FC<InvocationLogTabProps> = ({ llmList }) => {
         onClose={() => setDetailOpen(false)}
       >
         <Descriptions size="small" bordered column={2}>
-          <Descriptions.Item label="请求 ID" span={2}>{detail?.requestId || '-'}</Descriptions.Item>
+          <Descriptions.Item label="请求 ID" span={2}>
+            {detail?.requestId || '-'}
+          </Descriptions.Item>
           <Descriptions.Item label="供应商">{detail?.providerType || '-'}</Descriptions.Item>
           <Descriptions.Item label="模型">{detail?.modelName || '-'}</Descriptions.Item>
           <Descriptions.Item label="状态">{detail?.status || '-'}</Descriptions.Item>
@@ -1657,7 +1755,7 @@ const InvocationLogTab: React.FC<InvocationLogTabProps> = ({ llmList }) => {
           </Descriptions.Item>
         </Descriptions>
       </Drawer>
-    </>
+    </div>
   );
 };
 

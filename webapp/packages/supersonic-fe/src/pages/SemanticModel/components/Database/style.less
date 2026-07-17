@@ -1,0 +1,108 @@
+// 数据库管理页面样式：建立页面、ProTable 与表体之间的完整 flex 高度链，并统一表格展示规则。
+.databasePage {
+  display: flex;
+  height: calc(100vh - 140px);
+  min-height: 0;
+  margin: 20px;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.databaseTable {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+
+  :global {
+    .ant-pro-card,
+    .ant-pro-card-body,
+    .ant-table-wrapper,
+    // Ant Design 5/6 的 loading 包装层类名不同，两种结构都必须参与剩余高度分配。
+    .ant-spin,
+    .ant-spin-nested-loading,
+    .ant-spin-container,
+    .ant-table,
+    .ant-table-container {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .ant-pro-card-body {
+      padding: 0;
+    }
+
+    .ant-pro-table-list-toolbar,
+    .ant-table-header {
+      flex: none;
+    }
+
+    .ant-pro-table-list-toolbar-container {
+      padding: 20px;
+    }
+
+    .ant-table-body {
+      flex: 1;
+      min-height: 0;
+      overflow: auto !important;
+      scrollbar-color: rgba(144, 147, 153, 0.38) transparent;
+      scrollbar-width: thin;
+
+      &::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+
+      &::-webkit-scrollbar-track,
+      &::-webkit-scrollbar-corner {
+        background: transparent;
+      }
+
+      &::-webkit-scrollbar-thumb {
+        min-width: 28px;
+        min-height: 28px;
+        background-color: rgba(144, 147, 153, 0.38);
+        background-clip: padding-box;
+        border: 2px solid transparent;
+        border-radius: 999px;
+        transition: background-color 0.2s ease-out;
+      }
+
+      &:hover::-webkit-scrollbar-thumb {
+        background-color: rgba(144, 147, 153, 0.5);
+      }
+
+      &::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(144, 147, 153, 0.68);
+      }
+
+      &::-webkit-scrollbar-button {
+        width: 0;
+        height: 0;
+        display: none;
+      }
+    }
+
+    .ant-table-thead > tr > th,
+    .ant-table-tbody > tr > td {
+      overflow: hidden;
+      text-align: center;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .ant-table-tbody > tr > td .ant-space {
+      flex-wrap: nowrap;
+      white-space: nowrap;
+    }
+
+    .ant-table-pagination.ant-pagination {
+      flex: none;
+      margin: 12px 20px 20px;
+      // Ant Design 的逻辑属性会把末端外边距重置为 0，显式保留底部安全区以免分页贴边被裁切。
+      margin-block-end: 12px !important;
+    }
+  }
+}

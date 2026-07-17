@@ -1,6 +1,13 @@
 .pluginManage {
+  display: flex;
+  height: calc(100vh - 86px);
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+
   .filterSection {
     display: flex;
+    flex: none;
     flex-wrap: wrap;
     row-gap: 12px;
     column-gap: 30px;
@@ -28,13 +35,63 @@
   }
 
   .pluginList {
+    display: flex;
+    flex: 1;
+    min-height: 0;
     margin: 12px 24px;
     padding: 12px 20px;
     background: #fff;
     border-radius: 12px;
+    flex-direction: column;
+
+    :global {
+      .ant-table-wrapper {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      // Ant Design 5/6 的 Table loading 容器类名不同，二者都参与剩余高度分配。
+      .ant-spin,
+      .ant-spin-nested-loading,
+      .ant-spin-container,
+      .ant-table,
+      .ant-table-container {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      .ant-table-content,
+      .ant-table-body {
+        flex: 1;
+        min-height: 0;
+      }
+
+      .ant-table-content {
+        overflow: auto !important;
+      }
+
+      .ant-table-thead > tr > th,
+      .ant-table-tbody > tr > td {
+        overflow: hidden;
+        text-align: center;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .ant-table-pagination.ant-pagination {
+        flex: none;
+        margin-top: 12px;
+        margin-bottom: 0;
+      }
+    }
 
     .titleBar {
       display: flex;
+      flex: none;
       align-items: center;
       justify-content: space-between;
       margin-bottom: 12px;
@@ -49,7 +106,10 @@
     .modelColumn {
       display: flex;
       align-items: center;
+      justify-content: center;
+      overflow: hidden;
       column-gap: 2px;
+      white-space: nowrap;
     }
   }
 }
@@ -57,7 +117,9 @@
 .operator {
   display: flex;
   align-items: center;
+  justify-content: center;
   column-gap: 12px;
+  white-space: nowrap;
 }
 
 .paramsSection {

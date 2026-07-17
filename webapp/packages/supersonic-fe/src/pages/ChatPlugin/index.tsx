@@ -1,7 +1,7 @@
 /**
  * 聊天插件管理页面模块。
  *
- * 负责展示、筛选、新建、编辑和删除聊天插件配置，并通过稳定行 key 保障 antd Table 在 React 18 下渲染不产生 key 警告。
+ * 负责展示、筛选、新建、编辑和删除聊天插件配置，并统一处理表格自适应高度、分页序号和单行省略展示。
  */
 import { getLeafNodes } from '@/utils/utils';
 import { PlusOutlined } from '@ant-design/icons';
@@ -15,6 +15,7 @@ import styles from './style.less';
 import { ModelType, PluginType, PluginTypeEnum } from './type';
 
 const { Search } = Input;
+const DEFAULT_PAGE_SIZE = 20;
 
 const PluginManage = () => {
   const [name, setName] = useState<string>();
@@ -26,6 +27,8 @@ const PluginManage = () => {
   const [loading, setLoading] = useState(false);
   const [currentPluginDetail, setCurrentPluginDetail] = useState<PluginType>();
   const [detailModalVisible, setDetailModalVisible] = useState(false);
+  // 序号必须跟随客户端分页变化，避免翻页后重新从 1 开始编号。
+  const [pagination, setPagination] = useState({ current: 1, pageSize: DEFAULT_PAGE_SIZE });
 
   const initModelList = async () => {
     const res = await getModelList();
@@ -37,6 +40,7 @@ const PluginManage = () => {
     const res = await getPluginList({ name, type, pattern, model, ...(filters || {}) });
     setLoading(false);
     setData(res.data?.map((item) => ({ ...item, config: JSON.parse(item.config || '{}') })) || []);
+    setPagination((current) => ({ ...current, current: 1 }));
   };
 
   useEffect(() => {
@@ -57,15 +61,29 @@ const PluginManage = () => {
 
   const columns: any[] = [
     {
+      title: '序号',
+      key: 'sequence',
+      width: 80,
+      align: 'center',
+      ellipsis: true,
+      render: (_: unknown, __: PluginType, index: number) =>
+        (pagination.current - 1) * pagination.pageSize + index + 1,
+    },
+    {
       title: '插件名称',
       dataIndex: 'name',
       key: 'name',
+      width: 240,
+      align: 'center',
+      ellipsis: true,
     },
     {
       title: '数据集',
       dataIndex: 'dataSetList',
       key: 'dataSetList',
       width: 200,
+      align: 'center',
+      ellipsis: true,
       render: (value: number[]) => {
         if (value?.includes(-1)) {
           return '默认';
@@ -86,6 +104,9 @@ const PluginManage = () => {
       title: '插件类型',
       dataIndex: 'type',
       key: 'type',
+      width: 140,
+      align: 'center',
+      ellipsis: true,
       render: (value: string) => {
         return (
           <Tag color={value === PluginTypeEnum.WEB_PAGE ? 'blue' : 'cyan'}>
@@ -99,11 +120,16 @@ const PluginManage = () => {
       dataIndex: 'pattern',
       key: 'pattern',
       width: 450,
+      align: 'center',
+      ellipsis: true,
     },
     {
       title: '更新人',
       dataIndex: 'updatedBy',
       key: 'updatedBy',
+      width: 120,
+      align: 'center',
+      ellipsis: true,
       render: (value: string) => {
         return value || '-';
       },
@@ -112,6 +138,9 @@ const PluginManage = () => {
       title: '更新时间',
       dataIndex: 'updatedAt',
       key: 'updatedAt',
+      width: 180,
+      align: 'center',
+      ellipsis: true,
       render: (value: string) => {
         return value ? moment(value).format('YYYY-MM-DD HH:mm') : '-';
       },
@@ -120,6 +149,10 @@ const PluginManage = () => {
       title: '操作',
       dataIndex: 'x',
       key: 'x',
+      width: 140,
+      align: 'center',
+      fixed: 'right',
+      ellipsis: true,
       render: (_: any, record: any) => {
         return (
           <div className={styles.operator}>
@@ -234,7 +267,13 @@ const PluginManage = () => {
           columns={columns}
           dataSource={data}
           size="small"
-          pagination={{ defaultPageSize: 20 }}
+          tableLayout="fixed"
+          scroll={{ x: 1550 }}
+          pagination={{
+            current: pagination.current,
+            pageSize: pagination.pageSize,
+            onChange: (current, pageSize) => setPagination({ current, pageSize }),
+          }}
           loading={loading}
         />
       </div>

@@ -1,11 +1,19 @@
+// ProLayout 顶部导航高度固定为 56px；html/root 两层滚动容器各占用约 15px 槽位。
+@top-menu-height: 56px;
+@nested-scrollbar-gutter: 35px;
+
 .agent {
-  height: calc(100vh - 56px);
+  height: calc(100vh - @top-menu-height - @nested-scrollbar-gutter);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .agentsSection {
-  padding: 20px 40px;
+  padding: 20px 20px;
   background: #fff;
-  height: calc(100vh - 56px);
+  box-sizing: border-box;
+  height: 100%;
+  overflow: hidden;
 
   .sectionTitle {
     font-size: 24px;
@@ -26,8 +34,13 @@
 }
 
 .content {
-  // margin-top: 20px;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+
   .searchBar {
+    flex: none;
     display: flex;
     align-items: center;
     column-gap: 30px;
@@ -35,6 +48,59 @@
     justify-content: right;
     .searchControl {
       width: 500px;
+    }
+  }
+
+  .agentsTable {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+
+    :global {
+      .ant-spin,
+      .ant-spin-nested-loading,
+      .ant-spin-container {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      .ant-table {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        margin-bottom: 5px;
+        flex-direction: column;
+      }
+
+      .ant-table-container {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      .ant-table-content {
+        flex: 1;
+        min-height: 0;
+        overflow: auto !important;
+      }
+
+      .ant-table-thead > tr > th,
+      .ant-table-tbody > tr > td {
+        overflow: hidden;
+        text-align: center;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .ant-table-pagination.ant-pagination {
+        flex: none;
+        margin-top: 0;
+        margin-bottom: 0;
+      }
     }
   }
 
@@ -129,19 +195,36 @@
 .toggleStatus {
   display: flex;
   align-items: center;
+  justify-content: center;
   column-gap: 12px;
   font-size: 12px;
+  white-space: nowrap;
 
   .online {
     color: var(--chat-blue);
   }
 }
 
+.operateIcons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  column-gap: 12px;
+  white-space: nowrap;
+}
+
 .toolsSection {
+  display: flex;
+  height: calc(100vh - @top-menu-height - @nested-scrollbar-gutter);
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+
   .toolsSectionTitleBar {
     padding: 20px 30px;
     background-color: #fff;
     display: flex;
+    flex: none;
     align-items: center;
     column-gap: 20px;
 
@@ -186,10 +269,16 @@
 }
 
 .basicInfo {
-  margin: 20px;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  margin: 20px 20px 0px 20px;
   padding: 10px;
   background: #fff;
   border-radius: 6px;
+  box-sizing: border-box;
+  flex-direction: column;
+  overflow: hidden;
 
   .basicInfoTitle {
     display: flex;
@@ -214,6 +303,47 @@
         margin-right: 10px;
         font-size: 14px;
       }
+    }
+  }
+}
+
+.agentConfigForm {
+  height: 100%;
+  min-height: 0;
+}
+
+.agentConfigTabs {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+
+  :global {
+    .ant-tabs-nav {
+      flex: none;
+    }
+
+    .ant-tabs-content-holder,
+    .ant-tabs-body-holder {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .ant-tabs-body,
+    .ant-tabs-content,
+    .ant-tabs-tabpane {
+      height: 100%;
+      min-height: 0;
+    }
+
+    .ant-tabs-content,
+    .ant-tabs-tabpane {
+      box-sizing: border-box;
+      padding: 0 4px 16px;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
   }
 }
@@ -324,8 +454,12 @@
 }
 
 .memorySection {
-  margin-top: 10px;
-  margin-bottom: 30px;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  padding-top: 10px;
+  box-sizing: border-box;
+  flex-direction: column;
 
   :global {
     .ant-pro-card-body {
@@ -339,6 +473,7 @@
 
   .filterSection {
     display: flex;
+    flex: none;
     justify-content: space-between;
     // column-gap: 20px;
     margin-bottom: 20px;
@@ -360,6 +495,56 @@
     }
   }
 
+  .memoryTable {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+
+    :global {
+      .ant-pro-card,
+      .ant-pro-card-body,
+      .ant-table-wrapper,
+      .ant-spin,
+      .ant-spin-nested-loading,
+      .ant-spin-container,
+      .ant-table,
+      .ant-table-container {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      .ant-pro-card-body {
+        height: 100%;
+      }
+
+      .ant-table-content,
+      .ant-table-body {
+        flex: 1;
+        min-height: 0;
+      }
+
+      .ant-table-content {
+        overflow: auto !important;
+      }
+
+      .ant-table-empty .ant-table-body > table,
+      .ant-table-empty .ant-table-body .ant-table-tbody,
+      .ant-table-empty .ant-table-placeholder,
+      .ant-table-empty .ant-table-placeholder > td {
+        height: 100%;
+      }
+
+      .ant-table-pagination.ant-pagination {
+        flex: none;
+        margin-top: 8px;
+        margin-bottom: 0;
+      }
+    }
+  }
+
   .reviewComment {
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -375,6 +560,7 @@
 
 .search {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: end;
   gap: 10px;
@@ -394,11 +580,11 @@
 
 .permissionSection {
   width: 1000px;
-  height: calc(100vh - 250px);
+  min-height: 100%;
   margin: 0 auto;
   padding: 20px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   row-gap: 40px;
-  overflow-y: auto;
 }

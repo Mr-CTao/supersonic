@@ -8,10 +8,14 @@
  */
 import { PlusOutlined } from '@ant-design/icons';
 import { Button, Popconfirm, Switch, Table } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import moment from 'moment';
 import { useEffect, useState } from 'react';
 import styles from './style.less';
 import { AgentType } from './type';
+
+const DEFAULT_PAGE_SIZE = 10;
+const TABLE_SCROLL_X = 1000;
 
 type Props = {
   agents: AgentType[];
@@ -32,16 +36,27 @@ const AgentsSection: React.FC<Props> = ({
   onCreatBtnClick,
 }) => {
   const [showAgents, setShowAgents] = useState<AgentType[]>([]);
+  const [pageInfo, setPageInfo] = useState({ current: 1, pageSize: DEFAULT_PAGE_SIZE });
+  const [savingAgentId, setSavingAgentId] = useState<number>();
 
   useEffect(() => {
     setShowAgents(agents);
   }, [agents]);
 
-  const columns = [
+  const columns: ColumnsType<AgentType> = [
+    {
+      title: '序号',
+      key: 'sequence',
+      width: 72,
+      align: 'center',
+      render: (_value, _agent, index) => (pageInfo.current - 1) * pageInfo.pageSize + index + 1,
+    },
     {
       title: '助理名称',
       dataIndex: 'name',
       key: 'name',
+      width: 160,
+      align: 'center',
       render: (value: string, agent: AgentType) => {
         return (
           <a
@@ -58,11 +73,15 @@ const AgentsSection: React.FC<Props> = ({
       title: '描述',
       dataIndex: 'description',
       key: 'description',
+      width: 320,
+      align: 'center',
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
+      width: 130,
+      align: 'center',
       render: (status: number, agent: AgentType) => {
         return (
           <div className={styles.toggleStatus}>
@@ -76,8 +95,16 @@ const AgentsSection: React.FC<Props> = ({
                 key={agent.id}
                 size="small"
                 defaultChecked={status === 1}
-                onChange={(value) => {
-                  onSaveAgent({ ...agent, status: value ? 1 : 0 }, true);
+                loading={savingAgentId === agent.id}
+                disabled={savingAgentId === agent.id}
+                onChange={async (value) => {
+                  // 状态切换会立即写入后端，行级锁可避免连续点击造成请求乱序。
+                  setSavingAgentId(agent.id);
+                  try {
+                    await onSaveAgent({ ...agent, status: value ? 1 : 0 }, true);
+                  } finally {
+                    setSavingAgentId(undefined);
+                  }
                 }}
               />
             </span>
@@ -89,11 +116,15 @@ const AgentsSection: React.FC<Props> = ({
       title: '更新人',
       dataIndex: 'updatedBy',
       key: 'updatedBy',
+      width: 100,
+      align: 'center',
     },
     {
       title: '更新时间',
       dataIndex: 'updatedAt',
       key: 'updatedAt',
+      width: 170,
+      align: 'center',
       render: (value: string) => {
         return moment(value).format('YYYY-MM-DD HH:mm:ss');
       },
@@ -102,6 +133,9 @@ const AgentsSection: React.FC<Props> = ({
       title: '操作',
       dataIndex: 'x',
       key: 'x',
+      width: 100,
+      align: 'center',
+      fixed: 'right',
       render: (_: any, agent: AgentType) => {
         return (
           <div className={styles.operateIcons}>
@@ -143,7 +177,23 @@ const AgentsSection: React.FC<Props> = ({
             新建助理
           </Button>
         </div>
-        <Table rowKey="id" loading={loading} columns={columns} dataSource={showAgents} />
+        <Table<AgentType>
+          className={styles.agentsTable}
+          rowKey="id"
+          loading={loading}
+          columns={columns}
+          dataSource={showAgents}
+          tableLayout="fixed"
+          scroll={{ x: TABLE_SCROLL_X }}
+          pagination={{
+            current: pageInfo.current,
+            pageSize: pageInfo.pageSize,
+            showSizeChanger: true,
+            onChange: (current, pageSize) => {
+              setPageInfo({ current, pageSize });
+            },
+          }}
+        />
       </div>
     </div>
   );

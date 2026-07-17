@@ -1,3 +1,13 @@
+// 指标模块样式：负责指标市场的筛选区、动态表格、标签提示层及表格滚动反馈。
+// 滚动条规则仅作用于指标市场表体，避免影响语义建模模块内的弹窗和嵌入式表格。
+.metricMarket {
+  display: flex;
+  height: calc(100vh - 86px);
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+}
+
 .metricWrapper {
   width: 100%;
   margin-left: auto;
@@ -12,6 +22,7 @@
 }
 
 .metricFilterWrapper {
+  flex: none;
   margin: 20px;
   padding: 20px;
   padding-bottom: 5px;
@@ -20,11 +31,176 @@
 }
 
 .metricTable {
-  margin: 20px;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  margin: 0 20px 20px;
+  flex-direction: column;
+
   :global {
     .ant-pro-card-body {
       padding: 0;
     }
+
+    .ant-pro-card,
+    .ant-pro-card-body,
+    .ant-table-wrapper,
+    // Ant Design 5/6 使用不同的 loading 外层类名，两种结构都需要参与高度分配。
+    .ant-spin,
+    .ant-spin-nested-loading,
+    .ant-spin-container,
+    .ant-table,
+    .ant-table-container {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .ant-table-header {
+      flex: none;
+    }
+
+    // 固定列会生成一条仅用于计算列宽的测量行；选择框会把它撑到 22px，必须保持零高度但不能删除该行。
+    .ant-table-measure-row {
+      height: 0 !important;
+      visibility: collapse;
+
+      > td {
+        height: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        overflow: hidden;
+        line-height: 0 !important;
+        border: 0 !important;
+
+        > div {
+          height: 0 !important;
+          overflow: hidden !important;
+        }
+      }
+
+      .ant-checkbox-wrapper {
+        display: none;
+      }
+    }
+
+    .ant-table-body {
+      flex: 1;
+      min-height: 0;
+      overflow: auto !important;
+      // Firefox 使用标准属性提供与 WebKit 细滚动条接近的降级效果。
+      scrollbar-color: rgba(144, 147, 153, 0.38) transparent;
+      scrollbar-width: thin;
+
+      // 原生滚动继续由浏览器负责，只收窄槽位并用透明边框塑造 Element Plus 风格的 6px 滑块。
+      &::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+
+      &::-webkit-scrollbar-track,
+      &::-webkit-scrollbar-corner {
+        background: transparent;
+      }
+
+      &::-webkit-scrollbar-thumb {
+        min-width: 28px;
+        min-height: 28px;
+        background-color: rgba(144, 147, 153, 0.38);
+        background-clip: padding-box;
+        border: 2px solid transparent;
+        border-radius: 999px;
+        transition: background-color 0.2s ease-out;
+      }
+
+      // 容器悬停时提高可发现性，直接悬停滑块时再增强一档，兼顾轻量视觉和可操作性。
+      &:hover::-webkit-scrollbar-thumb {
+        background-color: rgba(144, 147, 153, 0.5);
+      }
+
+      &::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(144, 147, 153, 0.68);
+      }
+
+      &::-webkit-scrollbar-button {
+        width: 0;
+        height: 0;
+        display: none;
+      }
+    }
+
+    .ant-table-thead > tr > th,
+    .ant-table-tbody > tr > td {
+      overflow: hidden;
+      text-align: center;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    // 指标信息渲染器包含多个块级区域，改为同行排列后由单元格统一裁切。
+    .ant-table-tbody > tr > td:not(.ant-table-selection-column) > div {
+      display: inline-flex;
+      max-width: 100%;
+      max-height: 22px;
+      overflow: hidden;
+      vertical-align: middle;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    // 固定列会额外生成内容包装层，限制包装层高度才能避免复杂指标信息撑高整行。
+    .ant-table-cell-content {
+      max-width: 100%;
+      max-height: 22px;
+      overflow: hidden;
+      line-height: 22px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .ant-table-tbody > tr > td .ant-space-vertical {
+      align-items: center;
+      flex-flow: row nowrap;
+    }
+
+    .ant-table-pagination.ant-pagination {
+      flex: none;
+      margin-top: 12px;
+      margin-bottom: 0;
+    }
+  }
+}
+
+.metricTagList {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  overflow: hidden;
+  column-gap: 4px;
+  white-space: nowrap;
+
+  :global(.ant-tag) {
+    flex: none;
+    max-width: 100px;
+    margin: 0;
+    overflow: hidden;
+    border-radius: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.metricTagTooltip {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: 360px;
+  gap: 6px;
+  padding: 2px;
+
+  :global(.ant-tag) {
+    margin: 0;
+    white-space: nowrap;
   }
 }
 
@@ -79,34 +255,58 @@
 }
 
 .searchBox {
-  width: 740px;
+  display: grid;
+  align-items: center;
+  width: min(900px, 100%);
   margin: 0 auto;
-  // margin-bottom: 12px;
-  background: #fff;
-  border-radius: 10px;
+  column-gap: 16px;
+  grid-template-columns: 100px minmax(0, 1fr);
+
+  .searchLabel {
+    color: var(--text-color);
+    font-size: 18px;
+    font-weight: 600;
+    text-align: right;
+    white-space: nowrap;
+  }
+
   .searchInput {
     width: 100%;
-    border: 1px solid rgba(35, 104, 184, 0.6);
-    border-radius: 10px;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid #91caff;
+    border-radius: 8px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+
+    &:focus-within {
+      border-color: #1677ff;
+      box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+    }
   }
+
   :global {
-    .ant-select-auto-complete {
+    .ant-input-group-wrapper,
+    .ant-input-wrapper,
+    .ant-input-search {
       width: 100%;
     }
+
+    .ant-input-search {
+      align-items: stretch;
+    }
+
     .ant-input {
-      height: 50px;
-      padding: 0 15px;
+      height: 48px;
+      padding: 0 16px;
       color: #515a6e;
       font-size: 14px;
-      line-height: 50px;
-      background: hsla(0, 0%, 100%, 0.2);
+      line-height: 48px;
+      background: #fff;
       border: none;
-      border-top-left-radius: 10px;
-      border-bottom-left-radius: 10px;
+      border-radius: 0;
       caret-color: #296df3;
 
       &:focus {
-        border-right-width: 0 !important;
         box-shadow: none;
       }
     }
@@ -114,36 +314,64 @@
     .ant-input-group-addon {
       left: 0 !important;
       padding: 0;
-      background: hsla(0, 0%, 100%, 0.2);
+      background: #1677ff;
       border: none;
-      border-top-left-radius: 0;
-      border-top-right-radius: 10px;
-      border-bottom-right-radius: 10px;
-      border-bottom-left-radius: 0;
+      border-radius: 0;
 
       .ant-btn {
-        width: 72px;
-        height: 50px;
+        width: 56px;
+        height: 48px;
         margin: 0;
-        color: rgba(35, 104, 184, 0.6);
+        color: #fff;
         font-size: 16px;
-        background-color: transparent;
-        background-color: transparent;
+        background: #1677ff;
         border: none;
+        border-radius: 0;
         box-shadow: none !important;
 
-        &::after {
-          box-shadow: none !important;
+        &:hover,
+        &:focus {
+          color: #fff;
+          background: #0958d9;
         }
 
         .anticon {
-          font-size: 28px;
-
-          &:hover {
-            color: @primary-color;
-          }
+          font-size: 18px;
         }
       }
+    }
+
+    // Ant Design 6 使用 Space.Compact 取代 input-group-addon，需要直接约束搜索按钮。
+    .ant-input-search .ant-input-search-btn {
+      flex: 0 0 56px;
+      width: 56px !important;
+      height: 48px !important;
+      color: #fff;
+      background: #1677ff;
+      border: none;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+
+      &:hover,
+      &:focus {
+        color: #fff;
+        background: #0958d9;
+      }
+
+      .anticon {
+        font-size: 18px;
+      }
+    }
+  }
+}
+
+@media (max-width: 900px) {
+  .searchBox {
+    row-gap: 8px;
+    grid-template-columns: 1fr;
+
+    .searchLabel {
+      text-align: left;
     }
   }
 }

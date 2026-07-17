@@ -372,6 +372,7 @@ const MemorySection = ({ agentId }: Props) => {
         </Button>
       </div>
       <EditableProTable<MemoryType>
+        className={styles.memoryTable}
         rowKey="id"
         recordCreatorProps={false}
         loading={loading}

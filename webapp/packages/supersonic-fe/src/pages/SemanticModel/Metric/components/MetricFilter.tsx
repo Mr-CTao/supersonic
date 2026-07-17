@@ -1,3 +1,8 @@
+/**
+ * 指标市场筛选器模块。
+ *
+ * 负责指标关键字、主题域、展示范围和敏感度筛选，并提供响应式的指标搜索输入区域。
+ */
 import { Form, Input, Space, Row, Col } from 'antd';
 import StandardFormRow from '@/components/StandardFormRow';
 import TagSelect from '@/components/TagSelect';
@@ -69,33 +74,18 @@ const MetricFilter: React.FC<Props> = ({ initFilterValues = {}, extraNode, onFil
     >
       <StandardFormRow key="search" block>
         <div className={styles.searchBox}>
-          <Row>
-            <Col flex="100px">
-              <span
-                style={{
-                  fontSize: '18px',
-                  fontWeight: 'bold',
-                  position: 'relative',
-                  top: '12px',
+          <span className={styles.searchLabel}>指标搜索</span>
+          <FormItem name="key" noStyle>
+            <div className={styles.searchInput}>
+              <Input.Search
+                placeholder="请输入需要查询指标的ID、指标名称、英文名称、标签"
+                enterButton={<SearchOutlined />}
+                onSearch={(value) => {
+                  onSearch(value);
                 }}
-              >
-                指标搜索
-              </span>
-            </Col>
-            <Col flex="auto">
-              <FormItem name="key" noStyle>
-                <div className={styles.searchInput}>
-                  <Input.Search
-                    placeholder="请输入需要查询指标的ID、指标名称、英文名称、标签"
-                    enterButton={<SearchOutlined style={{ marginTop: 5 }} />}
-                    onSearch={(value) => {
-                      onSearch(value);
-                    }}
-                  />
-                </div>
-              </FormItem>
-            </Col>
-          </Row>
+              />
+            </div>
+          </FormItem>
         </div>
       </StandardFormRow>
       <Row style={{ width: '100%' }}>
