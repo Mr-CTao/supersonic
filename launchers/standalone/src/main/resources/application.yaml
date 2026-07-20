@@ -38,7 +38,28 @@ springdoc:
     - group: 'default'
       paths-to-match: '/**'
   packages-to-scan: com.tencent.supersonic
-  paths-to-match: /api/chat/**,/api/semantic/**
+  paths-to-match: /api/chat/**,/api/semantic/**,/api/forecast/**
+
+forecast:
+  enabled: true
+  meta:
+    # 元数据库迁移由发布流程执行；应用启动只校验版本，不自动执行 DDL。
+    validate-schema-on-startup: true
+  worker:
+    # 在线 Standalone 永不承担源库扫描和预测计算；请单独启动 forecast-worker。
+    enabled: false
+    concurrency: 2
+    batch-size: 5000
+    poll-seconds: 5
+    heartbeat-seconds: 15
+    lease-seconds: 90
+    max-retries: 3
+    stale-after-hours: 6
+  decision:
+    schema: ${FORECAST_DECISION_SCHEMA:forecast}
+    validate-schema-on-startup: true
+    initialize-schema: false
+    query-timeout-seconds: 30
 
 knife4j:
   enable: true

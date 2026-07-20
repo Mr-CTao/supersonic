@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: supersonic-forecast-worker
+  main:
+    web-application-type: none
+    allow-circular-references: true
+  datasource:
+    driver-class-name: ${S2_META_DB_DRIVER:org.h2.Driver}
+    url: ${S2_META_DB_URL:jdbc:h2:file:./data/h2/semantic;DATABASE_TO_UPPER=false;QUERY_TIMEOUT=30;AUTO_SERVER=TRUE}
+    username: ${S2_META_DB_USER:root}
+    password: ${S2_META_DB_PASSWORD:semantic}
+  sql:
+    init:
+      # 生产默认只校验已有 Schema，迁移脚本由发布流程显式执行。
+      mode: never
+
+forecast:
+  enabled: true
+  meta:
+    # Worker 与 Standalone 共用元数据库，只校验发布流程已安装的版本。
+    validate-schema-on-startup: true
+  worker:
+    enabled: true
+    concurrency: ${FORECAST_WORKER_CONCURRENCY:2}
+    batch-size: ${FORECAST_WORKER_BATCH_SIZE:5000}
+    poll-seconds: ${FORECAST_WORKER_POLL_SECONDS:5}
+    heartbeat-seconds: ${FORECAST_WORKER_HEARTBEAT_SECONDS:15}
+    lease-seconds: ${FORECAST_WORKER_LEASE_SECONDS:90}
+    max-retries: ${FORECAST_WORKER_MAX_RETRIES:3}
+    stale-after-hours: ${FORECAST_STALE_AFTER_HOURS:6}
+  decision:
+    schema: ${FORECAST_DECISION_SCHEMA:forecast}
+    validate-schema-on-startup: true
+    initialize-schema: false
+    query-timeout-seconds: ${FORECAST_DECISION_QUERY_TIMEOUT_SECONDS:30}
+
+logging:
+  level:
+    com.tencent.supersonic.forecast: INFO

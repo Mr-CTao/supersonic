@@ -17,6 +17,7 @@
         <module>headless</module>
         <module>common</module>
         <module>standalone</module>
+        <module>forecast-worker</module>
     </modules>
 
     <properties>

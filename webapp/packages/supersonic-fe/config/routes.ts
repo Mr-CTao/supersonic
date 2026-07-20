@@ -283,6 +283,36 @@ const ROUTES = [
     ],
   },
   {
+    path: '/forecast',
+    name: 'forecast',
+    component: './Forecast',
+    envEnableList: [ENV_KEY.SEMANTIC],
+    routes: [
+      {
+        path: '/forecast',
+        redirect: '/forecast/overview',
+      },
+      {
+        path: '/forecast/overview',
+        name: 'overview',
+        component: './Forecast/Overview',
+        envEnableList: [ENV_KEY.SEMANTIC],
+      },
+      {
+        path: '/forecast/sources',
+        name: 'sources',
+        component: './Forecast/Sources',
+        envEnableList: [ENV_KEY.SEMANTIC],
+      },
+      {
+        path: '/forecast/runs',
+        name: 'runs',
+        component: './Forecast/Runs',
+        envEnableList: [ENV_KEY.SEMANTIC],
+      },
+    ],
+  },
+  {
     path: '/system',
     name: 'system',
     component: './System',

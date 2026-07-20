@@ -1,0 +1,16 @@
+-- Forecast MVP PostgreSQL 决策库回滚脚本。
+-- 该脚本会删除 Forecast 决策数据；执行前必须先完成备份并停止 Worker。
+DROP VIEW IF EXISTS forecast.v_forecast_overview;
+DROP VIEW IF EXISTS forecast.v_forecast_latest_result;
+DROP VIEW IF EXISTS forecast.v_forecast_daily_fact;
+DROP TABLE IF EXISTS forecast.forecast_publication;
+DROP TABLE IF EXISTS forecast.forecast_result;
+DROP TABLE IF EXISTS forecast.model_run;
+DROP TABLE IF EXISTS forecast.stream_activation;
+DROP TABLE IF EXISTS forecast.daily_fact;
+DROP TABLE IF EXISTS forecast.aggregate_dirty;
+DROP TABLE IF EXISTS forecast.flow_event;
+DROP TABLE IF EXISTS forecast.event_stage;
+DROP TABLE IF EXISTS forecast.sync_batch;
+DROP TABLE IF EXISTS forecast.forecast_schema_version;
+DROP SCHEMA IF EXISTS forecast;
