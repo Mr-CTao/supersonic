@@ -11,6 +11,7 @@ package com.tencent.supersonic.common.llm;
 public final class LlmConstants {
 
     public static final String PROVIDER_DEEPSEEK = "DEEPSEEK";
+    public static final String PROVIDER_KIMI = "KIMI";
     public static final String PROVIDER_OPEN_AI = "OPEN_AI";
 
     public static final String ROLE_SYSTEM = "system";

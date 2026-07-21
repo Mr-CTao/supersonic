@@ -1,5 +1,6 @@
 package dev.langchain4j.provider;
 
+import com.tencent.supersonic.common.llm.LlmConstants;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import com.tencent.supersonic.common.pojo.EmbeddingModelConfig;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -21,7 +22,7 @@ import java.util.Map;
  *
  * <p>
  * 职责说明：根据系统中配置的 {@link ChatModelConfig} 和 {@link EmbeddingModelConfig} 创建 OpenAI 兼容的普通对话、流式对话和
- * Embedding 模型。该工厂同时承担第三方 OpenAI-compatible 服务的轻量适配职责，例如小米 MiMo 的自定义鉴权请求头。
+ * Embedding 模型。该工厂同时承担第三方 OpenAI-compatible 服务的轻量适配职责，例如 Kimi 的标准兼容协议和小米 MiMo 的自定义鉴权请求头。
  *
  * <p>
  * 并发说明：本类由 Spring 以单例方式管理，但不持有可变共享状态；每次创建模型时都只使用方法内局部变量组装 builder，因此无需额外的 {@code synchronized} 保护。
@@ -105,10 +106,16 @@ public class OpenAiModelFactory implements ModelFactory, InitializingBean {
 
     /**
      * 将本工厂注册到模型供应商注册表。
+     *
+     * <p>
+     * Kimi 的基础 ChatLanguageModel 调用与 OpenAI 协议兼容，因此复用本工厂；K3 特有的思考内容和严格参数约束由 Conversation Gateway 中的
+     * KimiProviderAdapter 处理，避免在通用工厂中混入厂商分支。
+     * </p>
      */
     @Override
     public void afterPropertiesSet() {
         ModelProvider.add(PROVIDER, this);
+        ModelProvider.add(LlmConstants.PROVIDER_KIMI, this);
     }
 
     /**

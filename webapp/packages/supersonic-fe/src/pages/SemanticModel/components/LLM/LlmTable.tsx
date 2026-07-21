@@ -241,6 +241,24 @@ const isDeepSeekModel = (item?: ISemantic.ILlmItem) => {
 };
 
 /**
+ * 判断模型连接是否 Kimi。
+ *
+ * @param item 大模型连接配置。
+ * @returns 显式 KIMI、Moonshot 域名或 kimi 模型名匹配时返回 true。
+ */
+const isKimiModel = (item?: ISemantic.ILlmItem) => {
+  const provider = item?.config?.provider || '';
+  const baseUrl = item?.config?.baseUrl || '';
+  const modelName = item?.config?.modelName || '';
+  return (
+    provider.toUpperCase() === 'KIMI' ||
+    baseUrl.toLowerCase().includes('moonshot.cn') ||
+    baseUrl.toLowerCase().includes('moonshot.ai') ||
+    modelName.toLowerCase().startsWith('kimi-')
+  );
+};
+
+/**
  * 格式化 JSON 展示文本。
  *
  * @param value JSON 对象或字符串。
@@ -1293,14 +1311,22 @@ const ConversationDebugTab: React.FC<ConversationDebugTabProps> = ({ llmList, se
               rules={[{ required: true, message: '请选择连接' }]}
             >
               <Select
-                placeholder="选择 DeepSeek 连接"
+                placeholder="选择大模型连接"
                 options={llmList.map((item) => ({
                   label: `${item.name} / ${item.config?.modelName || '-'}`,
                   value: item.id,
                 }))}
                 onChange={(value) => {
                   const target = llmList.find((item) => item.id === value);
-                  form.setFieldValue('modelName', target?.config?.modelName);
+                  const kimi = isKimiModel(target);
+                  // K3 固定采样参数且长思考耗时更高，切换连接时同步使用其安全默认值。
+                  form.setFieldsValue({
+                    modelName: target?.config?.modelName,
+                    temperature: kimi ? 1 : target?.config?.temperature ?? 0,
+                    timeoutMs: kimi ? 180000 : (target?.config?.timeOut ?? 60) * 1000,
+                    reasoningEffort: kimi ? 'max' : 'high',
+                    thinkingEnabled: kimi,
+                  });
                 }}
               />
             </Form.Item>
@@ -1585,6 +1611,7 @@ const InvocationLogTab: React.FC<InvocationLogTabProps> = ({ llmList }) => {
       valueType: 'select',
       valueEnum: {
         DEEPSEEK: { text: 'DEEPSEEK' },
+        KIMI: { text: 'KIMI' },
         OPEN_AI: { text: 'OPEN_AI' },
       },
       width: 120,

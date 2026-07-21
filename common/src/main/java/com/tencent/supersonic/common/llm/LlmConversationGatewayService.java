@@ -62,6 +62,7 @@ public class LlmConversationGatewayService {
     private static final String SEMANTIC_MODELING_CONVERSATION_TYPE = "SEMANTIC_MODELING";
     private static final String DEFAULT_USAGE_SCENE = "semantic_modeling";
     private static final int DEFAULT_CONTEXT_TOKENS = 128000;
+    private static final int KIMI_K3_CONTEXT_TOKENS = 1_000_000;
     private static final int MESSAGE_SUMMARY_LIMIT = 800;
     private static final int CONVERSATION_LOCK_STRIPE_COUNT = 64;
 
@@ -556,28 +557,32 @@ public class LlmConversationGatewayService {
     }
 
     /**
-     * 为未建能力表行的现有模型推断 DeepSeek/OpenAI-compatible 基础能力。
+     * 为未建能力表行的现有模型推断 Provider 基础能力。
+     *
+     * <p>Kimi K3 使用独立分支声明 1M 上下文、思考、Tool Calls、严格 JSON Schema 和自动上下文缓存；FIM
+     * 不属于 K3 Chat Completions 能力，因此保持关闭。</p>
      */
     private LlmModelCapabilityDO buildInferredCapability(Integer chatModelId,
             ChatModelConfig config) {
         boolean deepSeek = isDeepSeekConfig(config);
+        boolean kimi = isKimiConfig(config);
         Date now = new Date();
         LlmModelCapabilityDO capability = new LlmModelCapabilityDO();
         capability.setChatModelId(chatModelId);
-        capability
-                .setProviderType(deepSeek ? LlmConstants.PROVIDER_DEEPSEEK : config.getProvider());
+        capability.setProviderType(deepSeek ? LlmConstants.PROVIDER_DEEPSEEK
+                : kimi ? LlmConstants.PROVIDER_KIMI : config.getProvider());
         capability.setModelName(config.getModelName());
-        capability.setMaxContextTokens(DEFAULT_CONTEXT_TOKENS);
+        capability.setMaxContextTokens(kimi ? KIMI_K3_CONTEXT_TOKENS : DEFAULT_CONTEXT_TOKENS);
         capability.setSupportStream(true);
         capability.setSupportJsonMode(true);
-        capability.setSupportToolCalling(deepSeek);
-        capability.setSupportThinking(deepSeek);
-        capability.setSupportChatPrefixCompletion(deepSeek);
+        capability.setSupportToolCalling(deepSeek || kimi);
+        capability.setSupportThinking(deepSeek || kimi);
+        capability.setSupportChatPrefixCompletion(deepSeek || kimi);
         capability.setSupportFimCompletion(deepSeek);
-        capability.setSupportContextCache(deepSeek);
+        capability.setSupportContextCache(deepSeek || kimi);
         capability.setSupportSystemPrompt(true);
         capability.setRecommendedTemperature(
-                config.getTemperature() == null ? 0.0d : config.getTemperature());
+                kimi ? 1.0d : config.getTemperature() == null ? 0.0d : config.getTemperature());
         capability.setUsageScene(DEFAULT_USAGE_SCENE);
         capability.setEnabled(true);
         capability.setCreatedAt(now);
@@ -840,11 +845,12 @@ public class LlmConversationGatewayService {
         return resolved;
     }
 
-    /**
-     * 解析 providerType，DeepSeek OpenAI-compatible 配置优先识别为 DEEPSEEK。
-     */
+    /** 解析 providerType，优先根据厂商特征识别 DeepSeek 与 Kimi 的 OpenAI-compatible 配置。 */
     private String resolveProviderType(ChatModelConfig config) {
-        return isDeepSeekConfig(config) ? LlmConstants.PROVIDER_DEEPSEEK : config.getProvider();
+        if (isDeepSeekConfig(config)) {
+            return LlmConstants.PROVIDER_DEEPSEEK;
+        }
+        return isKimiConfig(config) ? LlmConstants.PROVIDER_KIMI : config.getProvider();
     }
 
     /**
@@ -857,6 +863,15 @@ public class LlmConversationGatewayService {
                 StringUtils.defaultString(config.getModelName()).toLowerCase(Locale.ROOT);
         return LlmConstants.PROVIDER_DEEPSEEK.equalsIgnoreCase(provider)
                 || baseUrl.contains("deepseek.com") || modelName.startsWith("deepseek-");
+    }
+
+    /** 判断配置是否属于 Kimi，兼容显式 KIMI provider 和历史 OPEN_AI 兼容配置。 */
+    private boolean isKimiConfig(ChatModelConfig config) {
+        String provider = StringUtils.defaultString(config.getProvider()).toUpperCase(Locale.ROOT);
+        String baseUrl = StringUtils.defaultString(config.getBaseUrl()).toLowerCase(Locale.ROOT);
+        String modelName = StringUtils.defaultString(config.getModelName()).toLowerCase(Locale.ROOT);
+        return LlmConstants.PROVIDER_KIMI.equals(provider) || baseUrl.contains("moonshot.cn")
+                || baseUrl.contains("moonshot.ai") || modelName.startsWith("kimi-");
     }
 
     /**

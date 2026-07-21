@@ -1,3 +1,11 @@
+/**
+ * 大模型连接动态表单。
+ *
+ * 职责：加载后端参数元数据、执行供应商字段联动、校验并提交连接配置，以及发起连接测试。供应商切换时允许用空字符串清理
+ * API Key/API Version，防止把上一供应商的凭证带入 KIMI 连接。
+ *
+ * 并发说明：连接测试状态只属于当前表单实例；外层弹窗同时提供按钮 loading 锁，后端负责最终的请求并发控制。
+ */
 import { useEffect, forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import type { ForwardRefRenderFunction } from 'react';
 import { message, Form, Input, Select, Button, Space, Slider, InputNumber } from 'antd';
@@ -203,7 +211,8 @@ const LlmCreateForm: ForwardRefRenderFunction<any, Props> = ({ llmItem, onSubmit
 
       if (lastSetDefaultValue) {
         const targetValue = lastSetDefaultValue[currentFormValues[lastSetDefaultValueItem.name]];
-        if (targetValue && !isInit) {
+        // 空字符串也是有效的联动默认值：切换到 KIMI 时必须清空其他供应商的 API Key/API Version，避免凭证串用。
+        if (targetValue !== undefined && !isInit) {
           form.setFieldValue(lastSetDefaultValueItem.excuteItem, targetValue);
         }
       }
