@@ -1,38 +1,15 @@
 /**
  * Forecast 运行中心页面样式。
  *
- * 职责：建立 PageContainer 到 ProTable 的完整高度链，并统一主列表的居中、单行省略、分页贴底和滚动反馈。
+ * 职责：建立模块壳层到 ProTable 的完整高度链，并统一主列表的居中、单行省略、分页贴底和滚动反馈。
  */
-@top-menu-height: 56px;
-@nested-scrollbar-gutter: 35px;
-
 .runsPage {
   display: flex;
-  height: calc(100vh - @top-menu-height - @nested-scrollbar-gutter);
+  width: 100%;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   flex-direction: column;
-
-  :global {
-    .ant-pro-page-container-warp-page-header {
-      flex: none;
-    }
-
-    // 同时兼容当前及相邻 ProComponents 版本的内容包装层，避免任一中间层中断 flex 高度传递。
-    .ant-pro-grid-content,
-    .ant-pro-grid-content-children,
-    .ant-pro-page-container-children-container {
-      display: flex;
-      flex: 1;
-      min-height: 0;
-      flex-direction: column;
-    }
-
-    // PageContainer 默认保留 32px 底部内边距，会在满高表格下方形成可见空带；本页由分页自身提供底部安全间距。
-    .ant-pro-page-container-children-container {
-      padding-block-end: 0;
-    }
-  }
 }
 
 .runsTable {
@@ -91,7 +68,7 @@
       flex: 1;
       min-height: 0;
       overflow: auto !important;
-      scrollbar-color: rgba(144, 147, 153, 0.38) transparent;
+      scrollbar-color: rgb(144 147 153 / 38%) transparent;
       scrollbar-width: thin;
 
       &::-webkit-scrollbar {
@@ -107,7 +84,7 @@
       &::-webkit-scrollbar-thumb {
         min-width: 28px;
         min-height: 28px;
-        background-color: rgba(144, 147, 153, 0.38);
+        background-color: rgb(144 147 153 / 38%);
         background-clip: padding-box;
         border: 2px solid transparent;
         border-radius: 999px;
@@ -115,11 +92,11 @@
       }
 
       &:hover::-webkit-scrollbar-thumb {
-        background-color: rgba(144, 147, 153, 0.5);
+        background-color: rgb(144 147 153 / 50%);
       }
 
       &::-webkit-scrollbar-thumb:hover {
-        background-color: rgba(144, 147, 153, 0.68);
+        background-color: rgb(144 147 153 / 68%);
       }
 
       &::-webkit-scrollbar-button {

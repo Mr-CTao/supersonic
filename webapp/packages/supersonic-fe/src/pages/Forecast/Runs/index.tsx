@@ -29,7 +29,7 @@ import {
 } from '@ant-design/icons';
 import { useLocation } from '@umijs/max';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import { ModalForm, PageContainer, ProFormSelect, ProTable } from '@ant-design/pro-components';
+import { ModalForm, ProFormSelect, ProTable } from '@ant-design/pro-components';
 import {
   Button,
   Descriptions,
@@ -288,11 +288,7 @@ const ForecastRuns: React.FC = () => {
 
   const selectedProfile = profiles.find((item) => item.id === profileId);
   return (
-    <PageContainer
-      className={styles.runsPage}
-      title="预测运行中心"
-      subTitle="任务进度、复合水位、吞吐与故障恢复"
-    >
+    <div className={styles.runsPage}>
       <ProTable<ForecastJob>
         className={styles.runsTable}
         actionRef={actionRef}
@@ -470,7 +466,7 @@ const ForecastRuns: React.FC = () => {
           />
         )}
       </Drawer>
-    </PageContainer>
+    </div>
   );
 };
 

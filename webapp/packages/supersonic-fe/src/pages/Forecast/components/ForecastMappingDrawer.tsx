@@ -1,8 +1,8 @@
 /**
- * 单表/视图或一次主从关联映射、预览、发布与首次同步抽屉。
+ * 单表/视图或一次主从关联映射、预览、发布与首次同步工作区。
  *
  * 职责：用白名单表单构造 SINGLE/HEADER_DETAIL 映射，不接受任意 SQL；预览最多一百行。
- * 所有提交按钮分别使用 loading 锁，防止重复创建版本或任务。
+ * 页面在 Profile 主从布局内原位呈现；所有提交按钮分别使用 loading 锁，防止重复创建版本或任务。
  */
 import {
   activateForecastMapping,
@@ -34,17 +34,24 @@ import {
 import type { ForecastMappingFormValues } from './forecastMappingForm';
 import { getForecastActivationButtonState } from './forecastActivation';
 import { FORECAST_MAPPING_HELP } from './forecastMappingHelp';
+import {
+  ArrowLeftOutlined,
+  CheckCircleOutlined,
+  QuestionCircleOutlined,
+  SwapRightOutlined,
+  WarningOutlined,
+} from '@ant-design/icons';
 import { history } from '@umijs/max';
 import {
   Alert,
   Button,
-  Descriptions,
-  Drawer,
+  Collapse,
   Form,
   Input,
   InputNumber,
   message,
   Progress,
+  Segmented,
   Select,
   Space,
   Table,
@@ -52,7 +59,9 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
+import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import styles from '../Sources/style.less';
 
 type Props = {
   open: boolean;
@@ -74,6 +83,47 @@ const FIELD_OPTIONS = [
   ['status', '任务状态', false],
   ['deleted', '删除标记', false],
 ] as const;
+const PRIMARY_FIELD_OPTIONS = FIELD_OPTIONS.slice(0, 6);
+const ADVANCED_FIELD_OPTIONS = FIELD_OPTIONS.slice(6);
+const REQUIRED_CORE_FIELD_COUNT = 5;
+
+type PersistedValidationSummary = {
+  errors: string[];
+  warnings: string[];
+};
+
+/** 返回发布按钮的禁用原因；无返回值表示当前草稿已经满足发布条件。 */
+const getPublishDisabledReason = (
+  mapping?: Pick<ForecastMapping, 'status' | 'valid'>,
+): string | undefined => {
+  if (!mapping) return '请先保存映射草稿并完成校验。';
+  if (mapping.status !== 'DRAFT') return '只有草稿版本可以发布。';
+  if (!mapping.valid) return '请先完成校验并确保映射有效。';
+  return undefined;
+};
+
+/** 将后端持久化的校验摘要拆成可逐条阅读的错误和警告。 */
+const parsePersistedValidationSummary = (summary?: string): PersistedValidationSummary => {
+  if (!summary?.trim()) return { errors: [], warnings: [] };
+
+  /** 兼容服务端的竖线分隔格式和前端历史版本使用的中文分号格式。 */
+  const splitItems = (value?: string) =>
+    value
+      ?.split(/\s*(?:\||；)\s*/)
+      .map((item) => item.trim())
+      .filter(Boolean) || [];
+  const normalized = summary.trim();
+  const errorsMatch = normalized.match(/errors\s*=\s*(.*?)(?=;\s*warnings\s*=|$)/i);
+  const warningsMatch = normalized.match(/warnings\s*=\s*(.*)$/i);
+
+  if (errorsMatch || warningsMatch) {
+    return {
+      errors: splitItems(errorsMatch?.[1]),
+      warnings: splitItems(warningsMatch?.[1]),
+    };
+  }
+  return { errors: [], warnings: splitItems(normalized) };
+};
 
 /** 将 Select 中的受控 JSON 值还原为列引用。 */
 const parseColumn = (value?: string): { tableAlias: string; column: string } | undefined =>
@@ -102,13 +152,13 @@ const parseMap = (value?: string): Record<string, string> => {
 };
 
 /**
- * 渲染映射向导抽屉。
+ * 渲染原位字段映射工作区。
  *
  * @param props 当前 Profile/Stream、显示状态与刷新回调。
- * @returns 映射抽屉。
+ * @returns 与 Profile 主从页面共享高度的映射工作区。
  * @throws 不主动抛出异常；配置和请求异常展示 message。
  */
-const ForecastMappingDrawer: React.FC<Props> = ({
+const ForecastMappingWorkspace: React.FC<Props> = ({
   open,
   profile,
   stream,
@@ -117,6 +167,7 @@ const ForecastMappingDrawer: React.FC<Props> = ({
   onChanged,
 }) => {
   const [form] = Form.useForm<ForecastMappingFormValues>();
+  const watchedValues = Form.useWatch([], form) as ForecastMappingFormValues | undefined;
   const [metadata, setMetadata] = useState<ForecastMetadata>();
   const relationMode = Form.useWatch('relationMode', form) || 'SINGLE';
   const [headerColumns, setHeaderColumns] = useState<string[]>([]);
@@ -463,395 +514,567 @@ const ForecastMappingDrawer: React.FC<Props> = ({
       }))
     : [];
 
+  /** 切换关系模式后清空依赖表别名的字段，避免旧表列被带入新版本。 */
+  const resetRelationFields = () => {
+    setSelectedHeader(undefined);
+    setSelectedDetail(undefined);
+    setHeaderColumns([]);
+    setDetailColumns([]);
+    form.resetFields([
+      'tableSelector',
+      'detailTableSelector',
+      'joinLeft',
+      'joinRight',
+      'sourceUpdatedAtSecondary',
+      ...FIELD_OPTIONS.map(([key]) => key),
+    ]);
+  };
+
+  const mappedCoreFieldCount = [
+    watchedValues?.sourceRecordId,
+    watchedValues?.quantity,
+    watchedValues?.occurredAt,
+    watchedValues?.warehouseCode || watchedValues?.warehouseConstant,
+    watchedValues?.direction || watchedValues?.directionConstant,
+  ].filter(Boolean).length;
+  const persistedValidation = useMemo(
+    () => parsePersistedValidationSummary(current?.validationSummary),
+    [current?.validationSummary],
+  );
+  const validationKnown = Boolean(validation || current?.valid);
+  const validationErrors = validation?.errors || persistedValidation.errors;
+  const validationWarnings = validation?.warnings || persistedValidation.warnings;
+  const lastSavedAt = current?.createdAt
+    ? dayjs(current.createdAt).format('YYYY-MM-DD HH:mm')
+    : undefined;
+  const currentVersionIsActive = Boolean(current && stream?.activeMappingId === current.id);
+  const publishDisabledReason = getPublishDisabledReason(current);
+  const publishDisabled = Boolean(publishDisabledReason);
+  // 底栏只突出当前流程中最接近完成的一项操作，避免校验、发布和激活同时争夺主按钮层级。
+  const primaryFooterAction = !activationButtonState.disabled
+    ? 'activate'
+    : !publishDisabled
+    ? 'publish'
+    : 'validate';
+
+  if (!open) return null;
+
   return (
-    <Drawer
-      size={1000}
-      open={open}
-      onClose={onClose}
-      destroyOnHidden
-      title={`字段映射 · ${stream?.name || ''}`}
-    >
-      <Alert
-        showIcon
-        type="info"
-        title="首版允许单表/视图或一次主表-明细表等值关联；更复杂结构请先在客户库创建标准视图。"
-        style={{ marginBottom: 16 }}
-      />
-      <Typography.Title level={5} style={{ marginTop: 0 }}>
-        版本与发布
-      </Typography.Title>
-      <Select
-        style={{ width: 420 }}
-        value={current?.id}
-        placeholder="当前数据流暂无映射版本"
-        onChange={(id) => {
-          setCurrent(mappings.find((item) => item.id === id));
-          setValidation(undefined);
-        }}
-        options={mappings.map((item) => ({
-          value: item.id,
-          label: `v${item.version} · ${item.status} · ${item.valid ? '有效' : '待校验'}${
-            item.id === stream?.activeMappingId ? ' · 当前活动' : ''
-          }`,
-        }))}
-      />
-      {current && (
-        <Descriptions
-          size="small"
-          column={2}
-          style={{ marginTop: 12 }}
-          items={[
-            { key: 'status', label: '状态', children: <Tag>{current.status}</Tag> },
-            { key: 'checksum', label: '配置摘要', children: current.configChecksum?.slice(0, 16) },
-            {
-              key: 'validation',
-              label: '校验',
-              span: 2,
-              children: current.validationSummary || '-',
-            },
-          ]}
-        />
-      )}
-      <Space style={{ marginTop: 12 }}>
+    <div className={styles.mappingWorkspace}>
+      <div className={styles.mappingHeader}>
         <Button
-          disabled={!current}
-          loading={loading === 'validate'}
-          onClick={() => runAction('validate')}
+          className={styles.mappingBack}
+          type="link"
+          icon={<ArrowLeftOutlined />}
+          onClick={onClose}
         >
-          校验并预览
+          返回数据流
         </Button>
-        <Button
-          disabled={!current?.valid || current?.status !== 'DRAFT'}
-          loading={loading === 'publish'}
-          onClick={() => runAction('publish')}
-        >
-          发布
-        </Button>
-        <Tooltip title={activationButtonState.reason}>
-          <span>
-            <Button
-              type="primary"
-              disabled={activationButtonState.disabled}
-              loading={loading === 'activate'}
-              onClick={() => runAction('activate')}
+        <div className={styles.mappingTitleRow}>
+          <Typography.Title level={4}>字段映射 · {stream?.name || ''}</Typography.Title>
+          <Tag color={stream?.enabled ? 'success' : 'default'}>
+            {stream?.enabled ? '启用' : '停用'}
+          </Tag>
+          <Typography.Text className={styles.mappingProfileName} type="secondary">
+            {profile?.name}
+          </Typography.Text>
+        </div>
+        <div className={styles.versionBar}>
+          <div className={styles.versionSelector}>
+            <Select
+              value={current?.id}
+              placeholder="当前数据流暂无映射版本"
+              onChange={(id) => {
+                setCurrent(mappings.find((item) => item.id === id));
+                setValidation(undefined);
+              }}
+              options={mappings.map((item) => ({
+                value: item.id,
+                label:
+                  'v' +
+                  item.version +
+                  ' · ' +
+                  item.status +
+                  ' · ' +
+                  (item.valid ? '有效' : '待校验') +
+                  (item.id === stream?.activeMappingId ? ' · 当前活动' : ''),
+              }))}
+            />
+            <Tooltip
+              trigger={['hover', 'focus']}
+              title={
+                current
+                  ? `当前编辑基于 v${current.version} 创建新版本，不会覆盖已发布配置。`
+                  : '当前数据流没有历史版本，请从空白配置创建首个映射。'
+              }
             >
-              {activationButtonState.label}
-            </Button>
-          </span>
-        </Tooltip>
-      </Space>
-      {activationButtonState.pending && latestActivation && (
-        <Alert
-          showIcon
-          type={workerHealthy === false ? 'error' : 'info'}
-          style={{ marginTop: 16 }}
-          title={`激活任务 #${latestActivation.jobId} · ${activationButtonState.label}`}
-          description={
-            <Space orientation="vertical" size={4} style={{ width: '100%' }}>
-              <Typography.Text>
-                当前活动映射不会提前切换；只有首次同步和预测全部成功后，候选版本才会原子生效。
-              </Typography.Text>
-              {workerHealthy === false && (
-                <Typography.Text type="danger">
-                  Worker 当前离线，因此 QUEUED 任务暂时不会开始执行。
+              <Button
+                className={styles.helpButton}
+                type="text"
+                size="small"
+                shape="circle"
+                icon={<QuestionCircleOutlined />}
+                aria-label="查看版本编辑说明"
+                title="查看版本编辑说明"
+              />
+            </Tooltip>
+          </div>
+          <div className={styles.versionMeta}>
+            <Typography.Text type="secondary">配置摘要</Typography.Text>
+            <Typography.Text code>{current?.configChecksum?.slice(0, 16) || '-'}</Typography.Text>
+          </div>
+          <div className={styles.versionState}>
+            <CheckCircleOutlined style={{ color: current?.valid ? '#52c41a' : '#bfbfbf' }} />
+            <Typography.Text type={current?.valid ? 'success' : 'secondary'}>
+              {current?.valid ? '映射有效' : '待校验'}
+            </Typography.Text>
+          </div>
+        </div>
+      </div>
+      <div className={styles.mappingScroll}>
+        {activationButtonState.pending && latestActivation && (
+          <Alert
+            showIcon
+            type={workerHealthy === false ? 'error' : 'info'}
+            style={{ marginTop: 16 }}
+            title={`激活任务 #${latestActivation.jobId} · ${activationButtonState.label}`}
+            description={
+              <Space orientation="vertical" size={4} style={{ width: '100%' }}>
+                <Typography.Text>
+                  当前活动映射不会提前切换；只有首次同步和预测全部成功后，候选版本才会原子生效。
+                </Typography.Text>
+                {workerHealthy === false && (
+                  <Typography.Text type="danger">
+                    Worker 当前离线，因此 QUEUED 任务暂时不会开始执行。
+                  </Typography.Text>
+                )}
+                {latestActivation.status === 'RUNNING' && (
+                  <Progress percent={latestActivation.progressPercent} size="small" />
+                )}
+              </Space>
+            }
+            action={
+              <Button
+                size="small"
+                onClick={() => history.push(`/forecast/runs?profileId=${profileId}`)}
+              >
+                查看任务
+              </Button>
+            }
+          />
+        )}
+        {failedActivation && (
+          <Alert
+            showIcon
+            type="error"
+            style={{ marginTop: 16 }}
+            title={`最近激活任务 #${failedActivation.jobId} 执行失败`}
+            description={failedActivation.errorMessage || '请到运行中心查看脱敏错误并重试。'}
+            action={
+              <Button
+                size="small"
+                onClick={() => history.push(`/forecast/runs?profileId=${profileId}`)}
+              >
+                查看任务
+              </Button>
+            }
+          />
+        )}
+        {workerHealthy === false && !activationButtonState.pending && (
+          <Alert
+            showIcon
+            type="warning"
+            style={{ marginTop: 16 }}
+            title="Forecast Worker 当前离线"
+            description="请先启动 Worker 再提交首次同步，否则任务只能停留在 QUEUED。"
+          />
+        )}
+        {validation && (
+          <Alert
+            style={{ marginTop: 16 }}
+            showIcon
+            type={validation.valid ? 'success' : 'error'}
+            title={validation.valid ? '映射校验通过' : validation.errors.join('；')}
+            description={validation.warnings.join('；')}
+          />
+        )}
+        <div className={styles.mappingBody}>
+          <div className={styles.mappingFormCanvas}>
+            <Form
+              form={form}
+              layout="vertical"
+              disabled={hydrating}
+              initialValues={{
+                sourceTimeZone: profile?.timeZone || 'Asia/Shanghai',
+                relationMode: 'SINGLE',
+                syncMode: 'INCREMENTAL',
+                lookbackDays: 7,
+                quantityTransform: 'NONE',
+                joinType: 'INNER',
+              }}
+            >
+              <section className={styles.formSection}>
+                <Typography.Text className={styles.sectionTitle} strong>
+                  1. 来源结构
+                </Typography.Text>
+                <Form.Item
+                  className={styles.relationMode}
+                  name="relationMode"
+                  label="关系模式"
+                  tooltip={FORECAST_MAPPING_HELP.relationMode}
+                  rules={[{ required: true }]}
+                >
+                  <Segmented
+                    block
+                    options={[
+                      { value: 'SINGLE', label: '单表 / 视图' },
+                      { value: 'HEADER_DETAIL', label: '主表 + 明细表' },
+                    ]}
+                    onChange={resetRelationFields}
+                  />
+                </Form.Item>
+                <div
+                  className={
+                    relationMode === 'HEADER_DETAIL' ? styles.relationTables : styles.singleTable
+                  }
+                >
+                  <Form.Item
+                    name="tableSelector"
+                    label={relationMode === 'SINGLE' ? '表或视图' : '主表或视图'}
+                    tooltip={
+                      relationMode === 'SINGLE'
+                        ? FORECAST_MAPPING_HELP.singleTable
+                        : FORECAST_MAPPING_HELP.headerTable
+                    }
+                    rules={[{ required: true }]}
+                  >
+                    <Select
+                      showSearch
+                      optionFilterProp="label"
+                      options={tableOptions}
+                      onChange={(value) => selectTable(value, 'header')}
+                    />
+                  </Form.Item>
+                  {relationMode === 'HEADER_DETAIL' && (
+                    <>
+                      <div className={styles.relationConnector} aria-hidden="true">
+                        <SwapRightOutlined />
+                      </div>
+                      <Form.Item
+                        name="detailTableSelector"
+                        label="明细表或视图"
+                        tooltip={FORECAST_MAPPING_HELP.detailTable}
+                        rules={[{ required: true }]}
+                      >
+                        <Select
+                          showSearch
+                          optionFilterProp="label"
+                          options={tableOptions}
+                          onChange={(value) => selectTable(value, 'detail')}
+                        />
+                      </Form.Item>
+                    </>
+                  )}
+                </div>
+                {relationMode === 'HEADER_DETAIL' && (
+                  <div className={styles.joinGrid}>
+                    <Form.Item
+                      name="joinType"
+                      label="关联类型"
+                      tooltip={FORECAST_MAPPING_HELP.joinType}
+                      rules={[{ required: true }]}
+                    >
+                      <Select options={['INNER', 'LEFT'].map((value) => ({ value }))} />
+                    </Form.Item>
+                    <Form.Item
+                      name="joinLeft"
+                      label="主表关联键"
+                      tooltip={FORECAST_MAPPING_HELP.joinLeft}
+                      rules={[{ required: true }]}
+                    >
+                      <Select showSearch optionFilterProp="label" options={headerColumnOptions} />
+                    </Form.Item>
+                    <Form.Item
+                      name="joinRight"
+                      label="明细表关联键"
+                      tooltip={FORECAST_MAPPING_HELP.joinRight}
+                      rules={[{ required: true }]}
+                    >
+                      <Select showSearch optionFilterProp="label" options={detailColumnOptions} />
+                    </Form.Item>
+                  </div>
+                )}
+              </section>
+              <section className={styles.formSection}>
+                <Typography.Text className={styles.sectionTitle} strong>
+                  2. 同步策略
+                </Typography.Text>
+                <div className={styles.syncGrid}>
+                  <Form.Item
+                    name="sourceTimeZone"
+                    label="源时区"
+                    tooltip={FORECAST_MAPPING_HELP.sourceTimeZone}
+                    rules={[{ required: true }]}
+                  >
+                    <Input />
+                  </Form.Item>
+                  <Form.Item
+                    name="syncMode"
+                    label="同步模式"
+                    tooltip={FORECAST_MAPPING_HELP.syncMode}
+                    rules={[{ required: true }]}
+                  >
+                    <Select
+                      options={[
+                        { value: 'INCREMENTAL', label: '复合水位增量' },
+                        { value: 'SNAPSHOT_LOOKBACK', label: '最近窗口重扫' },
+                      ]}
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="lookbackDays"
+                    label="重扫天数"
+                    tooltip={FORECAST_MAPPING_HELP.lookbackDays}
+                    extra="用于补偿源库迟到更新"
+                  >
+                    <InputNumber min={1} max={90} />
+                  </Form.Item>
+                  <Form.Item
+                    name="quantityTransform"
+                    label="数量变换"
+                    tooltip={FORECAST_MAPPING_HELP.quantityTransform}
+                  >
+                    <Select options={['NONE', 'ABS', 'NEGATE'].map((value) => ({ value }))} />
+                  </Form.Item>
+                </div>
+              </section>
+              <section className={styles.formSection}>
+                <Typography.Text className={styles.sectionTitle} strong>
+                  3. 标准事件字段
+                </Typography.Text>
+                <div className={styles.fieldGrid}>
+                  {PRIMARY_FIELD_OPTIONS.map(([key, label, required]) => (
+                    <Form.Item
+                      key={key}
+                      name={key}
+                      label={label}
+                      tooltip={FORECAST_MAPPING_HELP[key]}
+                      rules={required ? [{ required: true }] : undefined}
+                    >
+                      <Select
+                        allowClear
+                        showSearch
+                        optionFilterProp="label"
+                        options={columnOptions}
+                      />
+                    </Form.Item>
+                  ))}
+                </div>
+                <Collapse
+                  className={styles.advancedPanel}
+                  size="small"
+                  items={[
+                    {
+                      key: 'advanced',
+                      label: '高级映射（方向、状态、删除标记与字典）',
+                      // 折叠时仍挂载字段，保证读取和保存历史版本时不会丢失高级映射配置。
+                      forceRender: true,
+                      children: (
+                        <>
+                          <Typography.Paragraph type="secondary">
+                            方向与仓库编码必须分别配置来源列或固定值；状态、删除标记与字典按源库实际语义选填。
+                          </Typography.Paragraph>
+                          <div className={styles.advancedFieldGrid}>
+                            {ADVANCED_FIELD_OPTIONS.map(([key, label, required]) => (
+                              <Form.Item
+                                key={key}
+                                name={key}
+                                label={label}
+                                tooltip={FORECAST_MAPPING_HELP[key]}
+                                rules={required ? [{ required: true }] : undefined}
+                              >
+                                <Select
+                                  allowClear
+                                  showSearch
+                                  optionFilterProp="label"
+                                  options={columnOptions}
+                                />
+                              </Form.Item>
+                            ))}
+                            <Form.Item
+                              name="warehouseConstant"
+                              label="固定仓库编码（可选）"
+                              tooltip={FORECAST_MAPPING_HELP.warehouseConstant}
+                            >
+                              <Input maxLength={255} />
+                            </Form.Item>
+                            <Form.Item
+                              name="directionConstant"
+                              label="固定方向（可选）"
+                              tooltip={FORECAST_MAPPING_HELP.directionConstant}
+                            >
+                              <Select
+                                allowClear
+                                options={[
+                                  { value: 'INBOUND', label: '入库 INBOUND' },
+                                  { value: 'OUTBOUND', label: '出库 OUTBOUND' },
+                                ]}
+                              />
+                            </Form.Item>
+                            {relationMode === 'HEADER_DETAIL' && (
+                              <Form.Item
+                                name="sourceUpdatedAtSecondary"
+                                label="第二更新时间列（可选）"
+                                tooltip={FORECAST_MAPPING_HELP.sourceUpdatedAtSecondary}
+                              >
+                                <Select
+                                  allowClear
+                                  showSearch
+                                  optionFilterProp="label"
+                                  options={columnOptions}
+                                />
+                              </Form.Item>
+                            )}
+                          </div>
+                          <div className={styles.dictionaryGrid}>
+                            <Form.Item
+                              name="directionMap"
+                              label="方向字典 JSON"
+                              tooltip={FORECAST_MAPPING_HELP.directionMap}
+                            >
+                              <Input.TextArea rows={3} />
+                            </Form.Item>
+                            <Form.Item
+                              name="statusMap"
+                              label="状态字典 JSON"
+                              tooltip={FORECAST_MAPPING_HELP.statusMap}
+                            >
+                              <Input.TextArea rows={3} />
+                            </Form.Item>
+                          </div>
+                        </>
+                      ),
+                    },
+                  ]}
+                />
+              </section>
+            </Form>
+
+            {validation?.samples?.length ? (
+              <section className={styles.previewSection}>
+                <Typography.Text className={styles.sectionTitle} strong>
+                  校验预览
+                </Typography.Text>
+                <Table
+                  size="small"
+                  rowKey="sourceRecordId"
+                  columns={previewColumns}
+                  dataSource={validation.samples}
+                  pagination={{ pageSize: 10 }}
+                  scroll={{ x: 'max-content' }}
+                />
+              </section>
+            ) : null}
+          </div>
+
+          <aside className={styles.validationRail} aria-label="校验结果">
+            <Typography.Title level={5}>校验结果</Typography.Title>
+            <div className={styles.validationStats}>
+              <div className={styles.validationStat}>
+                <Typography.Text type="secondary">errors</Typography.Text>
+                <Typography.Title level={4}>
+                  {validationKnown ? validationErrors.length : '-'}
+                </Typography.Title>
+              </div>
+              <div className={styles.validationStat}>
+                <Typography.Text type="secondary">warnings</Typography.Text>
+                <Typography.Title level={4} style={{ color: '#d48806' }}>
+                  {validationKnown ? validationWarnings.length : '-'}
+                </Typography.Title>
+              </div>
+              <div className={styles.validationStat}>
+                <Typography.Text type="secondary">核心字段</Typography.Text>
+                <Typography.Title level={4} style={{ color: '#389e0d' }}>
+                  {mappedCoreFieldCount}/{REQUIRED_CORE_FIELD_COUNT}
+                </Typography.Title>
+              </div>
+            </div>
+            <div className={styles.validationWarnings}>
+              {validationWarnings.length ? (
+                validationWarnings.slice(0, 3).map((warning) => (
+                  <div className={styles.warningItem} key={warning}>
+                    <WarningOutlined />
+                    <Typography.Text>{warning}</Typography.Text>
+                  </div>
+                ))
+              ) : (
+                <Typography.Text type="secondary">
+                  校验后将在这里显示错误、风险提示与预览结果。
                 </Typography.Text>
               )}
-              {latestActivation.status === 'RUNNING' && (
-                <Progress percent={latestActivation.progressPercent} size="small" />
-              )}
-            </Space>
-          }
-          action={
-            <Button
-              size="small"
-              onClick={() => history.push(`/forecast/runs?profileId=${profileId}`)}
-            >
-              查看任务
-            </Button>
-          }
-        />
-      )}
-      {failedActivation && (
-        <Alert
-          showIcon
-          type="error"
-          style={{ marginTop: 16 }}
-          title={`最近激活任务 #${failedActivation.jobId} 执行失败`}
-          description={failedActivation.errorMessage || '请到运行中心查看脱敏错误并重试。'}
-          action={
-            <Button
-              size="small"
-              onClick={() => history.push(`/forecast/runs?profileId=${profileId}`)}
-            >
-              查看任务
-            </Button>
-          }
-        />
-      )}
-      {workerHealthy === false && !activationButtonState.pending && (
-        <Alert
-          showIcon
-          type="warning"
-          style={{ marginTop: 16 }}
-          title="Forecast Worker 当前离线"
-          description="请先启动 Worker 再提交首次同步，否则任务只能停留在 QUEUED。"
-        />
-      )}
-      {validation && (
-        <Alert
-          style={{ marginTop: 16 }}
-          showIcon
-          type={validation.valid ? 'success' : 'error'}
-          title={validation.valid ? '映射校验通过' : validation.errors.join('；')}
-          description={validation.warnings.join('；')}
-        />
-      )}
-      {validation?.samples?.length ? (
-        <Table
-          style={{ marginTop: 12 }}
-          size="small"
-          rowKey="sourceRecordId"
-          columns={previewColumns}
-          dataSource={validation.samples}
-          pagination={{ pageSize: 10 }}
-          scroll={{ x: 'max-content' }}
-        />
-      ) : null}
+            </div>
+          </aside>
+        </div>
+      </div>
 
-      <Typography.Title level={5} style={{ marginTop: 24 }}>
-        {current ? `基于 v${current.version} 创建新版本` : '创建首个映射版本'}
-      </Typography.Title>
-      <Alert
-        showIcon
-        type={current ? 'info' : 'warning'}
-        title={current ? `已回填 v${current.version} 的完整配置` : '请从空白配置开始创建'}
-        description={
-          current
-            ? `下方字段是 v${current.version} 的可编辑副本；提交后会生成新版本，不会覆盖已发布配置。`
-            : '当前数据流没有可复用的历史版本，完成必填字段后将创建 v1 草稿。'
-        }
-        style={{ marginBottom: 16 }}
-      />
-      <Form
-        form={form}
-        layout="vertical"
-        disabled={hydrating}
-        initialValues={{
-          sourceTimeZone: profile?.timeZone || 'Asia/Shanghai',
-          relationMode: 'SINGLE',
-          syncMode: 'INCREMENTAL',
-          lookbackDays: 7,
-          quantityTransform: 'NONE',
-          joinType: 'INNER',
-        }}
-      >
-        <Space wrap align="start" style={{ width: '100%' }}>
-          <Form.Item
-            name="relationMode"
-            label="关系模式"
-            tooltip={FORECAST_MAPPING_HELP.relationMode}
-            rules={[{ required: true }]}
+      <footer className={styles.mappingFooter}>
+        <div className={styles.footerMeta}>
+          <Typography.Text className={styles.footerTimestamp} type="secondary">
+            {lastSavedAt ? '当前版本创建于：' + lastSavedAt : '尚未创建映射版本'}
+          </Typography.Text>
+          {currentVersionIsActive ? (
+            <Tag className={styles.footerStatusTag} color="success" icon={<CheckCircleOutlined />}>
+              当前版本已激活
+            </Tag>
+          ) : (
+            <Tag className={styles.footerStatusTag}>
+              活动版本 {stream?.activeMappingVersion ? 'v' + stream.activeMappingVersion : '-'}
+            </Tag>
+          )}
+        </div>
+        <Space className={styles.footerActions}>
+          <Button onClick={onClose}>取消</Button>
+          <Button loading={hydrating || loading === 'create'} onClick={createDraft}>
+            保存草稿
+          </Button>
+          <Button
+            type={primaryFooterAction === 'validate' ? 'primary' : 'default'}
+            disabled={!current}
+            loading={loading === 'validate'}
+            onClick={() => runAction('validate')}
           >
-            <Select
-              style={{ width: 190 }}
-              options={[
-                { value: 'SINGLE', label: '单表 / 视图' },
-                { value: 'HEADER_DETAIL', label: '主表 + 明细表' },
-              ]}
-              onChange={() => {
-                setSelectedHeader(undefined);
-                setSelectedDetail(undefined);
-                setHeaderColumns([]);
-                setDetailColumns([]);
-                form.resetFields([
-                  'tableSelector',
-                  'detailTableSelector',
-                  'joinLeft',
-                  'joinRight',
-                  'sourceUpdatedAtSecondary',
-                  ...FIELD_OPTIONS.map(([key]) => key),
-                ]);
-              }}
-            />
-          </Form.Item>
-          <Form.Item
-            name="tableSelector"
-            label={relationMode === 'SINGLE' ? '表或视图' : '主表或视图'}
-            tooltip={
-              relationMode === 'SINGLE'
-                ? FORECAST_MAPPING_HELP.singleTable
-                : FORECAST_MAPPING_HELP.headerTable
-            }
-            rules={[{ required: true }]}
-          >
-            <Select
-              showSearch
-              style={{ width: 330 }}
-              options={tableOptions}
-              onChange={(value) => selectTable(value, 'header')}
-            />
-          </Form.Item>
-          {relationMode === 'HEADER_DETAIL' && (
-            <Form.Item
-              name="detailTableSelector"
-              label="明细表或视图"
-              tooltip={FORECAST_MAPPING_HELP.detailTable}
-              rules={[{ required: true }]}
-            >
-              <Select
-                showSearch
-                style={{ width: 330 }}
-                options={tableOptions}
-                onChange={(value) => selectTable(value, 'detail')}
-              />
-            </Form.Item>
+            校验并预览
+          </Button>
+          <Tooltip title={publishDisabledReason}>
+            <span>
+              <Button
+                type={primaryFooterAction === 'publish' ? 'primary' : 'default'}
+                disabled={publishDisabled}
+                loading={loading === 'publish'}
+                onClick={() => runAction('publish')}
+              >
+                发布新版本
+              </Button>
+            </span>
+          </Tooltip>
+          {!currentVersionIsActive && (
+            <Tooltip title={activationButtonState.reason}>
+              <span>
+                <Button
+                  type={primaryFooterAction === 'activate' ? 'primary' : 'default'}
+                  disabled={activationButtonState.disabled}
+                  loading={loading === 'activate'}
+                  onClick={() => runAction('activate')}
+                >
+                  {activationButtonState.label}
+                </Button>
+              </span>
+            </Tooltip>
           )}
         </Space>
-        {relationMode === 'HEADER_DETAIL' && (
-          <Space wrap align="start">
-            <Form.Item
-              name="joinType"
-              label="关联类型"
-              tooltip={FORECAST_MAPPING_HELP.joinType}
-              rules={[{ required: true }]}
-            >
-              <Select
-                style={{ width: 130 }}
-                options={['INNER', 'LEFT'].map((value) => ({ value }))}
-              />
-            </Form.Item>
-            <Form.Item
-              name="joinLeft"
-              label="主表关联键"
-              tooltip={FORECAST_MAPPING_HELP.joinLeft}
-              rules={[{ required: true }]}
-            >
-              <Select showSearch style={{ width: 260 }} options={headerColumnOptions} />
-            </Form.Item>
-            <Form.Item
-              name="joinRight"
-              label="明细表关联键"
-              tooltip={FORECAST_MAPPING_HELP.joinRight}
-              rules={[{ required: true }]}
-            >
-              <Select showSearch style={{ width: 260 }} options={detailColumnOptions} />
-            </Form.Item>
-          </Space>
-        )}
-        <Space wrap align="start">
-          <Form.Item
-            name="sourceTimeZone"
-            label="源时区"
-            tooltip={FORECAST_MAPPING_HELP.sourceTimeZone}
-            rules={[{ required: true }]}
-          >
-            <Input style={{ width: 180 }} />
-          </Form.Item>
-          <Form.Item
-            name="syncMode"
-            label="同步模式"
-            tooltip={FORECAST_MAPPING_HELP.syncMode}
-            rules={[{ required: true }]}
-          >
-            <Select
-              style={{ width: 190 }}
-              options={[
-                { value: 'INCREMENTAL', label: '复合水位增量' },
-                { value: 'SNAPSHOT_LOOKBACK', label: '最近窗口重扫' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item
-            name="lookbackDays"
-            label="重扫天数"
-            tooltip={FORECAST_MAPPING_HELP.lookbackDays}
-          >
-            <InputNumber min={1} max={90} />
-          </Form.Item>
-          <Form.Item
-            name="quantityTransform"
-            label="数量变换"
-            tooltip={FORECAST_MAPPING_HELP.quantityTransform}
-          >
-            <Select
-              style={{ width: 130 }}
-              options={['NONE', 'ABS', 'NEGATE'].map((value) => ({ value }))}
-            />
-          </Form.Item>
-        </Space>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3,minmax(180px,1fr))',
-            gap: '0 16px',
-          }}
-        >
-          {FIELD_OPTIONS.map(([key, label, required]) => (
-            <Form.Item
-              key={key}
-              name={key}
-              label={label}
-              tooltip={FORECAST_MAPPING_HELP[key]}
-              rules={required ? [{ required: true }] : undefined}
-            >
-              <Select allowClear showSearch options={columnOptions} />
-            </Form.Item>
-          ))}
-        </div>
-        <Space wrap align="start">
-          <Form.Item
-            name="warehouseConstant"
-            label="固定仓库编码（可选）"
-            tooltip={FORECAST_MAPPING_HELP.warehouseConstant}
-          >
-            <Input style={{ width: 240 }} maxLength={255} />
-          </Form.Item>
-          <Form.Item
-            name="directionConstant"
-            label="固定方向（可选）"
-            tooltip={FORECAST_MAPPING_HELP.directionConstant}
-          >
-            <Select
-              allowClear
-              style={{ width: 200 }}
-              options={[
-                { value: 'INBOUND', label: '入库 INBOUND' },
-                { value: 'OUTBOUND', label: '出库 OUTBOUND' },
-              ]}
-            />
-          </Form.Item>
-        </Space>
-        {relationMode === 'HEADER_DETAIL' && (
-          <Form.Item
-            name="sourceUpdatedAtSecondary"
-            label="第二更新时间列（可选）"
-            tooltip={FORECAST_MAPPING_HELP.sourceUpdatedAtSecondary}
-          >
-            <Select allowClear showSearch style={{ width: 330 }} options={columnOptions} />
-          </Form.Item>
-        )}
-        <Space style={{ width: '100%' }} align="start">
-          <Form.Item
-            name="directionMap"
-            label="方向字典 JSON"
-            tooltip={FORECAST_MAPPING_HELP.directionMap}
-          >
-            <Input.TextArea rows={3} style={{ width: 390 }} />
-          </Form.Item>
-          <Form.Item
-            name="statusMap"
-            label="状态字典 JSON"
-            tooltip={FORECAST_MAPPING_HELP.statusMap}
-          >
-            <Input.TextArea rows={3} style={{ width: 390 }} />
-          </Form.Item>
-        </Space>
-        <Button type="primary" loading={hydrating || loading === 'create'} onClick={createDraft}>
-          {current ? `基于 v${current.version} 创建新映射版本` : '创建首个映射版本'}
-        </Button>
-      </Form>
-    </Drawer>
+      </footer>
+    </div>
   );
 };
 
-export default ForecastMappingDrawer;
+export default ForecastMappingWorkspace;

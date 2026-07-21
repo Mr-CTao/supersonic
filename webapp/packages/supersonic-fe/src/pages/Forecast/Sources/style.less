@@ -1,0 +1,747 @@
+/**
+ * Forecast 数据接入与字段映射工作区样式。
+ *
+ * 职责：建立模块壳层到主从工作区的完整高度链，统一 Profile 主列表、数据流表格、
+ * 原位字段映射表单与校验栏的响应式布局，并确保操作区单行、内容区独立滚动。
+ */
+@primary-color: #296df3;
+@border-color: #edf0f5;
+@muted-surface: #f7f9fc;
+
+.sourcesPage {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.sourcesWorkspace {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid @border-color;
+  border-radius: 8px;
+  grid-template-columns: clamp(288px, 22vw, 336px) minmax(0, 1fr);
+}
+
+.profilePane {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  border-right: 1px solid @border-color;
+  flex-direction: column;
+}
+
+.profilePaneHeader {
+  display: flex;
+  min-height: 68px;
+  padding: 14px 16px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid @border-color;
+  gap: 12px;
+
+  :global(.ant-typography) {
+    margin: 0;
+  }
+
+  :global(.ant-btn) {
+    flex: none;
+    white-space: nowrap;
+  }
+}
+
+.profileList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.profileLoading,
+.detailEmpty {
+  display: flex;
+  flex: 1;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+}
+
+.profileItem {
+  position: relative;
+  min-height: 132px;
+  border-bottom: 1px solid @border-color;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+
+  &::before {
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 3px;
+    content: '';
+    background: transparent;
+  }
+
+  &:hover {
+    background: #fafcff;
+
+    .profileActions {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+}
+
+.profileItemActive {
+  background: #edf5ff;
+
+  &::before {
+    background: @primary-color;
+  }
+}
+
+.profileSelection {
+  display: flex;
+  width: 100%;
+  min-height: 132px;
+  padding: 18px 84px 18px 20px;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  flex-direction: column;
+  gap: 10px;
+
+  &:focus-visible {
+    outline: 2px solid fade(@primary-color, 55%);
+    outline-offset: -2px;
+  }
+
+  :global(.ant-typography) {
+    display: block;
+    max-width: 100%;
+  }
+}
+
+.profileMeta {
+  display: flex;
+  width: 100%;
+  margin-top: auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+
+  :global(.ant-tag) {
+    flex: none;
+    margin-inline-end: 0;
+  }
+
+  :global(.ant-typography) {
+    overflow: hidden;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.profileActions {
+  position: absolute;
+  top: 12px;
+  right: 10px;
+  display: flex;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  gap: 0;
+
+  &:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.profilePagination {
+  display: flex;
+  min-height: 60px;
+  padding: 12px 14px;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid @border-color;
+
+  :global(.ant-pagination) {
+    display: flex;
+    max-width: 100%;
+    align-items: center;
+    white-space: nowrap;
+  }
+}
+
+.detailPane,
+.streamsView {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  flex: 1;
+  flex-direction: column;
+}
+
+.streamsView {
+  padding: 20px 24px 16px;
+}
+
+.detailHeader {
+  display: flex;
+  min-height: 42px;
+  margin-bottom: 16px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.detailTitle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+
+  :global(.ant-typography) {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :global(.ant-tag),
+  :global(.ant-badge) {
+    flex: none;
+    white-space: nowrap;
+  }
+}
+
+.detailActions {
+  flex: none;
+  flex-wrap: nowrap;
+
+  :global(.ant-btn) {
+    white-space: nowrap;
+  }
+}
+
+.profileSummary {
+  display: grid;
+  overflow: hidden;
+  margin-bottom: 14px;
+  background: #fff;
+  border: 1px solid @border-color;
+  border-radius: 7px;
+  grid-template-columns: repeat(6, minmax(110px, 1fr));
+}
+
+.summaryItem {
+  display: flex;
+  min-width: 0;
+  padding: 14px 16px;
+  border-right: 1px solid @border-color;
+  flex-direction: column;
+  gap: 6px;
+
+  &:last-child {
+    border-right: 0;
+  }
+
+  :global(.ant-typography) {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.workerNotice {
+  flex: none;
+  margin-bottom: 14px;
+
+  :global(.ant-alert-message) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.streamsSection {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sectionHeading,
+.versionSelector {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+// 静态说明收进可聚焦的问号按钮，既节省纵向空间，也保留键盘访问能力。
+.helpButton {
+  flex: none;
+  color: #8c8c8c;
+
+  &:hover,
+  &:focus-visible {
+    color: @primary-color;
+  }
+}
+
+.streamsTable {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+
+  :global {
+    .ant-pro-card,
+    .ant-pro-card-body,
+    .ant-table-wrapper,
+    .ant-spin,
+    .ant-spin-nested-loading,
+    .ant-spin-container,
+    .ant-table,
+    .ant-table-container {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .ant-pro-card-body {
+      padding: 0;
+    }
+
+    .ant-table-content,
+    .ant-table-body {
+      flex: 1;
+      min-height: 0;
+      overflow: auto !important;
+    }
+
+    .ant-table-thead > tr > th,
+    .ant-table-tbody > tr > td {
+      overflow: hidden;
+      text-align: center;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .ant-table-thead > tr > th:first-child,
+    .ant-table-tbody > tr > td:first-child {
+      text-align: left;
+    }
+
+    .ant-table-thead > tr > th .ant-space,
+    .ant-table-tbody > tr > td .ant-space {
+      max-width: 100%;
+      justify-content: center;
+      overflow: hidden;
+      flex-wrap: nowrap;
+      white-space: nowrap;
+    }
+
+    .ant-table-measure-row {
+      height: 0 !important;
+      visibility: collapse;
+    }
+  }
+}
+
+/* 字段映射工作区 */
+.mappingWorkspace {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.mappingHeader {
+  flex: none;
+  padding: 14px 24px 0;
+}
+
+.mappingBack {
+  height: auto;
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.mappingTitleRow {
+  display: flex;
+  min-width: 0;
+  margin-bottom: 12px;
+  align-items: center;
+  gap: 10px;
+
+  :global(.ant-typography) {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :global(.ant-tag) {
+    flex: none;
+  }
+}
+
+.mappingProfileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.versionBar {
+  display: grid;
+  min-height: 52px;
+  padding: 8px 12px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid @border-color;
+  border-radius: 7px;
+  grid-template-columns: minmax(260px, 420px) minmax(160px, 1fr) auto;
+  gap: 16px;
+}
+
+.versionSelector {
+  :global(.ant-select) {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.versionMeta,
+.versionState {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+
+  :global(.ant-typography) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.mappingScroll {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 24px 16px;
+  overflow-y: auto;
+}
+
+.mappingBody {
+  display: grid;
+  min-width: 0;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 22px;
+}
+
+.mappingFormCanvas {
+  min-width: 0;
+}
+
+.formSection {
+  padding: 2px 0 10px;
+  border-bottom: 1px solid @border-color;
+
+  & + & {
+    padding-top: 12px;
+  }
+
+  :global(.ant-form-item) {
+    min-width: 0;
+    margin-bottom: 10px;
+  }
+
+  :global(.ant-form-item-label) {
+    padding-bottom: 4px;
+  }
+
+  :global(.ant-select),
+  :global(.ant-input),
+  :global(.ant-input-number) {
+    width: 100%;
+  }
+}
+
+.sectionTitle {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+
+.relationMode {
+  margin-bottom: 10px;
+
+  :global(.ant-segmented) {
+    width: 100%;
+    max-width: 360px;
+  }
+
+  :global(.ant-segmented-item) {
+    min-width: 150px;
+    text-align: center;
+  }
+}
+
+.relationTables {
+  display: grid;
+  align-items: end;
+  grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.singleTable {
+  display: grid;
+  max-width: 620px;
+  grid-template-columns: minmax(260px, 1fr);
+}
+
+.relationConnector {
+  display: flex;
+  height: 46px;
+  align-items: center;
+  justify-content: center;
+  color: @primary-color;
+  font-size: 18px;
+}
+
+.joinGrid,
+.fieldGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 0 16px;
+}
+
+.syncGrid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 0.7fr 0.8fr;
+  gap: 0 16px;
+}
+
+.advancedPanel {
+  margin-top: 16px;
+
+  :global(.ant-collapse-header) {
+    align-items: center !important;
+    font-weight: 500;
+  }
+}
+
+.advancedFieldGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 0 16px;
+}
+
+.dictionaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 0 16px;
+}
+
+.previewSection {
+  padding-top: 18px;
+}
+
+.validationRail {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+  padding-left: 20px;
+  border-left: 1px solid @border-color;
+}
+
+.validationStats {
+  display: grid;
+  margin: 12px 0 16px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.validationStat {
+  display: flex;
+  min-width: 0;
+  padding: 10px 4px;
+  text-align: center;
+  background: @muted-surface;
+  border-radius: 6px;
+  flex-direction: column;
+  gap: 4px;
+
+  :global(.ant-typography) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.validationWarnings {
+  display: flex;
+  margin-bottom: 16px;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.warningItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+
+  :global(.anticon) {
+    margin-top: 3px;
+    color: #faad14;
+    flex: none;
+  }
+}
+
+.footerMeta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  overflow: hidden;
+  flex: 1;
+  gap: 8px;
+}
+
+.footerTimestamp {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footerStatusTag {
+  margin-inline-end: 0;
+  white-space: nowrap;
+  flex: none;
+}
+
+.mappingFooter {
+  // 底栏是映射工作区的非伸缩 flex 子项；中间滚动区吸收剩余高度，因此不会横跨左侧 Profile 列。
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 24px;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff;
+  border-top: 1px solid @border-color;
+  box-shadow: 0 -4px 12px rgb(29 43 76 / 4%);
+  flex: none;
+  gap: 16px;
+
+  :global(.ant-typography) {
+    white-space: nowrap;
+  }
+}
+
+.footerActions {
+  flex: none;
+  flex-wrap: nowrap;
+
+  :global(.ant-btn) {
+    min-width: 104px;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 1500px) {
+  .profileSummary {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+
+  .summaryItem:nth-child(3) {
+    border-right: 0;
+  }
+
+  .summaryItem:nth-child(-n + 3) {
+    border-bottom: 1px solid @border-color;
+  }
+
+  .mappingBody {
+    grid-template-columns: minmax(0, 1fr) 230px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .sourcesWorkspace {
+    grid-template-columns: 270px minmax(0, 1fr);
+  }
+
+  .detailHeader,
+  .mappingFooter {
+    align-items: flex-start;
+  }
+
+  .mappingBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .validationRail {
+    position: static;
+    padding-top: 18px;
+    padding-left: 0;
+    border-top: 1px solid @border-color;
+    border-left: 0;
+  }
+
+  .syncGrid,
+  .fieldGrid,
+  .advancedFieldGrid {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+}
+
+// 展开模块导航后，1280px 桌面视口的字段映射区会明显变窄；此处提前改为上下布局，避免表单列互相挤压。
+@media (max-width: 1380px) {
+  .sourcesWorkspace {
+    grid-template-columns: 264px minmax(0, 1fr);
+  }
+
+  .mappingBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .validationRail {
+    position: static;
+    padding-top: 18px;
+    padding-left: 0;
+    border-top: 1px solid @border-color;
+    border-left: 0;
+  }
+
+  .syncGrid,
+  .fieldGrid,
+  .advancedFieldGrid {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+}

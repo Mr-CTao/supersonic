@@ -295,18 +295,21 @@ const ROUTES = [
       {
         path: '/forecast/overview',
         name: 'overview',
+        hideInMenu: true,
         component: './Forecast/Overview',
         envEnableList: [ENV_KEY.SEMANTIC],
       },
       {
         path: '/forecast/sources',
         name: 'sources',
+        hideInMenu: true,
         component: './Forecast/Sources',
         envEnableList: [ENV_KEY.SEMANTIC],
       },
       {
         path: '/forecast/runs',
         name: 'runs',
+        hideInMenu: true,
         component: './Forecast/Runs',
         envEnableList: [ENV_KEY.SEMANTIC],
       },

@@ -1,0 +1,270 @@
+/**
+ * 出入库预测模块壳层样式。
+ *
+ * 职责：复刻已确认的左侧模块导航方案，统一三个子页面的紧凑页头与满高内容区，
+ * 并在导航完全隐藏后让业务内容无缝回收侧栏宽度。
+ */
+@global-header-height: 56px;
+@module-navigation-width: 216px;
+@module-header-height: 64px;
+@border-color: #edf0f5;
+@primary-color: #296df3;
+@navigation-transition-duration: 220ms;
+@navigation-fade-duration: 160ms;
+@navigation-transition-easing: cubic-bezier(0.2, 0, 0, 1);
+
+:global(body.ss-forecast-page-scroll-lock),
+:global(body.ss-forecast-page-scroll-lock #root) {
+  height: 100%;
+  overflow: hidden;
+}
+
+:global(body.ss-forecast-page-scroll-lock .ant-design-pro),
+:global(body.ss-forecast-page-scroll-lock .ant-pro-layout-container),
+:global(body.ss-forecast-page-scroll-lock .ant-layout) {
+  height: 100%;
+  max-height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:global(body.ss-forecast-page-scroll-lock .ant-pro-layout-content) {
+  height: calc(100vh - @global-header-height);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.forecastShell {
+  display: flex;
+  width: 100%;
+  height: calc(100vh - @global-header-height);
+  min-height: 0;
+  overflow: hidden;
+  background: #fafafb;
+}
+
+.moduleNavigation {
+  display: flex;
+  width: @module-navigation-width;
+  min-width: @module-navigation-width;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+  border-right: 1px solid @border-color;
+  box-sizing: border-box;
+  flex: none;
+  flex-direction: column;
+  opacity: 1;
+  transform: translateX(0);
+  transition: width @navigation-transition-duration @navigation-transition-easing,
+    min-width @navigation-transition-duration @navigation-transition-easing,
+    opacity @navigation-fade-duration ease-out,
+    transform @navigation-transition-duration @navigation-transition-easing,
+    border-color @navigation-fade-duration ease-out,
+    border-width @navigation-transition-duration @navigation-transition-easing;
+  visibility: visible;
+}
+
+.moduleNavigationHidden {
+  width: 0;
+  min-width: 0;
+  pointer-events: none;
+  border-right-color: transparent;
+  border-right-width: 0;
+  opacity: 0;
+  transform: translateX(-12px);
+  transition: width @navigation-transition-duration @navigation-transition-easing,
+    min-width @navigation-transition-duration @navigation-transition-easing,
+    opacity @navigation-fade-duration ease-in,
+    transform @navigation-transition-duration @navigation-transition-easing,
+    border-color @navigation-fade-duration ease-in,
+    border-width @navigation-transition-duration @navigation-transition-easing,
+    visibility 0s linear @navigation-transition-duration;
+  visibility: hidden;
+}
+
+.moduleNavigationInner {
+  display: flex;
+  width: @module-navigation-width;
+  min-width: @module-navigation-width;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.moduleMenu {
+  flex: 1;
+  // 首个菜单项直接贴合工作台顶部，并与右侧紧凑标题栏形成同一条 64px 水平基线。
+  padding-top: 0;
+  overflow-y: auto;
+  border-inline-end: 0 !important;
+
+  :global {
+    .ant-menu-item {
+      position: relative;
+      width: 100%;
+      height: @module-header-height;
+      margin: 0;
+      padding-inline: 24px !important;
+      border-radius: 0;
+      line-height: @module-header-height;
+    }
+
+    .ant-menu-item::before {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 3px;
+      content: '';
+      background: transparent;
+    }
+
+    .ant-menu-item-selected::before {
+      background: @primary-color;
+    }
+
+    .ant-menu-item .anticon {
+      font-size: 18px;
+    }
+  }
+}
+
+.navigationFooter {
+  flex: none;
+  padding: 10px 12px;
+  border-top: 1px solid @border-color;
+
+  :global(.ant-btn) {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: flex-start;
+  }
+}
+
+.moduleMain {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  flex: 1;
+  flex-direction: column;
+}
+
+.moduleHeader {
+  display: flex;
+  height: @module-header-height;
+  min-height: @module-header-height;
+  padding: 12px 24px;
+  align-items: center;
+  background: #fafafb;
+  flex: none;
+}
+
+.navigationTriggerSlot {
+  width: 0;
+  height: 40px;
+  margin-right: 0;
+  overflow: hidden;
+  pointer-events: none;
+  flex: none;
+  opacity: 0;
+  transform: translateX(-8px);
+  transition: width @navigation-transition-duration @navigation-transition-easing,
+    margin-right @navigation-transition-duration @navigation-transition-easing,
+    opacity @navigation-fade-duration ease-in,
+    transform @navigation-transition-duration @navigation-transition-easing;
+}
+
+.navigationTriggerSlotVisible {
+  width: 40px;
+  margin-right: 16px;
+  pointer-events: auto;
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.navigationTrigger {
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+
+.moduleHeading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 16px;
+
+  :global(.ant-typography) {
+    min-width: 0;
+    margin: 0;
+  }
+
+  :global(h4.ant-typography) {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  :global(span.ant-typography) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.moduleBody {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 24px 24px;
+  overflow: hidden;
+  flex: 1;
+  flex-direction: column;
+
+  > * {
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+  }
+}
+
+@media (max-width: 1440px) {
+  .moduleNavigation {
+    width: 200px;
+    min-width: 200px;
+  }
+
+  .moduleNavigationHidden {
+    width: 0;
+    min-width: 0;
+  }
+
+  .moduleNavigationInner {
+    width: 200px;
+    min-width: 200px;
+  }
+
+  .moduleMenu :global(.ant-menu-item) {
+    padding-inline: 20px !important;
+  }
+
+  .moduleHeader {
+    padding-inline: 20px;
+  }
+
+  .moduleBody {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moduleNavigation,
+  .moduleNavigationHidden,
+  .navigationTriggerSlot,
+  .navigationTriggerSlotVisible {
+    transition: none;
+  }
+}

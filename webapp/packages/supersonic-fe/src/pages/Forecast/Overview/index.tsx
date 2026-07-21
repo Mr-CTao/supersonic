@@ -22,13 +22,13 @@ import type {
   ForecastSeriesPoint,
   ForecastSummary,
 } from '@/services/forecast';
-import { PageContainer } from '@ant-design/pro-components';
 import {
   Alert,
   Card,
   Col,
   Empty,
   message,
+  notification,
   Row,
   Segmented,
   Select,
@@ -40,8 +40,14 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import styles from './style.less';
 
 const HORIZONS = [7, 14, 30];
+const STALE_DATA_NOTIFICATION_KEY = 'forecast-overview-stale-data-notification';
+const STALE_DATA_NOTIFICATION_DURATION_SECONDS = 3;
+const STALE_DATA_NOTIFICATION_TOP_MARGIN_PX = 48;
+const STALE_DATA_NOTIFICATION_TITLE = '数据已过期';
+const STALE_DATA_NOTIFICATION_DESCRIPTION = '请到运行中心检查同步任务';
 
 /** 格式化可空数值，避免 NaN 进入图表和 KPI。 */
 const formatNumber = (value?: number) =>
@@ -64,6 +70,7 @@ const ForecastOverview: React.FC = () => {
   const [health, setHealth] = useState<ForecastHealth>();
   const [loading, setLoading] = useState(false);
   const requestVersion = useRef(0);
+  const staleDataNotificationShown = useRef(false);
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -116,6 +123,29 @@ const ForecastOverview: React.FC = () => {
     };
   }, [loadDashboard]);
 
+  useEffect(() => {
+    if (health?.freshnessStatus !== 'STALE' || staleDataNotificationShown.current) return;
+    // 页面轮询会每 30 秒刷新健康状态；用组件生命周期内的标记避免同一次进入期间重复打扰用户。
+    staleDataNotificationShown.current = true;
+    notification.warning({
+      key: STALE_DATA_NOTIFICATION_KEY,
+      title: STALE_DATA_NOTIFICATION_TITLE,
+      description: STALE_DATA_NOTIFICATION_DESCRIPTION,
+      duration: STALE_DATA_NOTIFICATION_DURATION_SECONDS,
+      placement: 'topRight',
+      // Notification 默认距视口顶部 24px；增加 48px 外边距后停靠在全局导航栏下方。
+      style: { marginTop: STALE_DATA_NOTIFICATION_TOP_MARGIN_PX },
+    });
+  }, [health?.freshnessStatus]);
+
+  useEffect(
+    () => () => {
+      // 用户离开看板时立即清理本页提示，避免浮层继续覆盖运行中心或数据接入页面。
+      notification.destroy(STALE_DATA_NOTIFICATION_KEY);
+    },
+    [],
+  );
+
   const columns: ColumnsType<ForecastBreakdown> = useMemo(
     () => [
       { title: '仓库', dataIndex: 'warehouseCode' },
@@ -150,7 +180,7 @@ const ForecastOverview: React.FC = () => {
   );
 
   return (
-    <PageContainer title="出入库预测看板" subTitle="实际数据、未来预测与模型质量">
+    <div className={styles.overviewPage}>
       <Space wrap style={{ marginBottom: 16 }}>
         <Select
           style={{ width: 260 }}
@@ -196,17 +226,8 @@ const ForecastOverview: React.FC = () => {
           style={{ marginBottom: 16 }}
         />
       )}
-      {health?.freshnessStatus === 'STALE' && (
-        <Alert
-          showIcon
-          type="warning"
-          title="数据已过期，请到运行中心检查同步任务"
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
       <Spin spinning={loading}>
-        <Row gutter={[16, 16]}>
+        <Row className={styles.dashboardGrid} gutter={[16, 16]}>
           <Col xs={24} md={8}>
             <Card>
               <Statistic
@@ -255,7 +276,7 @@ const ForecastOverview: React.FC = () => {
           </Col>
         </Row>
       </Spin>
-    </PageContainer>
+    </div>
   );
 };
 

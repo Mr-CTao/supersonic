@@ -1,0 +1,72 @@
+/**
+ * 出入库预测看板内容样式。
+ *
+ * 职责：让看板在模块壳层内独立纵向滚动，消除栅格负边距产生的页面级横向滚动，
+ * 并复用指标市场的细滚动条反馈，确保长图表和窄屏表格仍可自然操作。
+ */
+@scrollbar-thumb-color: rgb(144 147 153 / 38%);
+@scrollbar-thumb-hover-color: rgb(144 147 153 / 50%);
+@scrollbar-thumb-active-color: rgb(144 147 153 / 68%);
+
+// 复用指标市场的原生滚动条视觉；浏览器仍负责滚动行为，不引入额外脚本和监听器。
+.forecastScrollbar() {
+  scrollbar-color: @scrollbar-thumb-color transparent;
+  scrollbar-width: thin;
+
+  &::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  &::-webkit-scrollbar-track,
+  &::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    min-width: 28px;
+    min-height: 28px;
+    background-color: @scrollbar-thumb-color;
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    transition: background-color 0.2s ease-out;
+  }
+
+  &:hover::-webkit-scrollbar-thumb {
+    background-color: @scrollbar-thumb-hover-color;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: @scrollbar-thumb-active-color;
+  }
+
+  &::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
+.overviewPage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding-bottom: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+  .forecastScrollbar();
+
+  // Row 的默认负边距会额外制造 8px 横向溢出；归零后保留 Col gutter，同时取消无意义的页面横向滚动条。
+  .dashboardGrid {
+    margin-right: 0 !important;
+    margin-left: 0 !important;
+  }
+
+  // 窄屏时仅让表格自身承载水平滚动，滚动反馈与指标市场保持一致。
+  :global(.ant-table-body),
+  :global(.ant-table-content) {
+    .forecastScrollbar();
+  }
+}
