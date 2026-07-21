@@ -44,6 +44,7 @@ import {
 } from 'antd';
 import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import styles from './style.less';
 
 const STATUS_COLOR: Record<ForecastJobStatus, string> = {
   QUEUED: 'default',
@@ -60,6 +61,31 @@ const TYPE_TEXT: Record<string, string> = {
   AGGREGATE: '聚合',
   FORECAST: '预测',
 };
+
+/** 手动任务类型及其面向业务用户的执行范围说明。 */
+const MANUAL_TASK_TYPE_OPTIONS: Array<{
+  value: ForecastJobType;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'INCREMENTAL_SYNC',
+    label: '增量同步',
+    description: '把上次之后新增加、改过的数据补进来。平时更新数据，或错过自动执行时用这个。',
+  },
+  {
+    value: 'RECONCILE',
+    label: '最近窗口对账',
+    description: '重新检查最近一段时间的数据，把后来改过或删掉的内容纠正过来。数据越多，时间越长。',
+  },
+  {
+    value: 'FORECAST',
+    label: '重新预测',
+    description:
+      '用系统里已有的数据再算一次未来 30 天的结果。它不会先更新数据，最好先完成“增量同步”。',
+  },
+];
+
 const formatTime = (value?: string) =>
   value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-';
 
@@ -104,6 +130,8 @@ const ForecastRuns: React.FC = () => {
   const [detail, setDetail] = useState<ForecastJob>();
   const [createOpen, setCreateOpen] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<number>();
+  // ProTable 会在请求完成后再渲染数据行；使用 ref 记录请求页码可生成连续序号，并避免受控分页在渲染期触发 setState。
+  const paginationRef = useRef({ current: 1, pageSize: 20 });
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -149,6 +177,14 @@ const ForecastRuns: React.FC = () => {
 
   const columns: ProColumns<ForecastJob>[] = useMemo(
     () => [
+      {
+        title: '序号',
+        dataIndex: 'sequence',
+        width: 80,
+        search: false,
+        render: (_, __, index) =>
+          (paginationRef.current.current - 1) * paginationRef.current.pageSize + index + 1,
+      },
       { title: '任务 ID', dataIndex: 'id', width: 90, search: false },
       {
         title: '类型',
@@ -252,15 +288,23 @@ const ForecastRuns: React.FC = () => {
 
   const selectedProfile = profiles.find((item) => item.id === profileId);
   return (
-    <PageContainer title="预测运行中心" subTitle="任务进度、复合水位、吞吐与故障恢复">
+    <PageContainer
+      className={styles.runsPage}
+      title="预测运行中心"
+      subTitle="任务进度、复合水位、吞吐与故障恢复"
+    >
       <ProTable<ForecastJob>
+        className={styles.runsTable}
         actionRef={actionRef}
         rowKey="id"
         columns={columns}
         search={false}
         polling={5000}
-        scroll={{ x: 1150 }}
-        pagination={{ defaultPageSize: 20 }}
+        scroll={{ x: 1230, y: '100%' }}
+        pagination={{
+          defaultPageSize: paginationRef.current.pageSize,
+          showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条/总共 ${total} 条`,
+        }}
         toolbar={{
           title: (
             <Select
@@ -284,6 +328,10 @@ const ForecastRuns: React.FC = () => {
           </Button>,
         ]}
         request={async (params) => {
+          paginationRef.current = {
+            current: params.current || 1,
+            pageSize: params.pageSize || 20,
+          };
           if (!profileId) return { data: [], total: 0, success: true };
           try {
             const response = await getForecastJobs({
@@ -331,11 +379,27 @@ const ForecastRuns: React.FC = () => {
           name="type"
           label="任务类型"
           rules={[{ required: true }]}
-          options={[
-            { value: 'INCREMENTAL_SYNC', label: '增量同步' },
-            { value: 'RECONCILE', label: '最近窗口对账' },
-            { value: 'FORECAST', label: '重新预测' },
-          ]}
+          options={MANUAL_TASK_TYPE_OPTIONS}
+          fieldProps={{
+            // 选项数量固定且很少，关闭虚拟滚动以正确承载双行可变高度说明文字。
+            virtual: false,
+            optionRender: (option) => {
+              const taskOption = MANUAL_TASK_TYPE_OPTIONS.find(
+                (item) => item.value === option.value,
+              );
+              if (!taskOption) return option.label;
+              return (
+                <div style={{ padding: '4px 0', whiteSpace: 'normal' }}>
+                  <Typography.Text strong>{taskOption.label}</Typography.Text>
+                  <div style={{ marginTop: 2, lineHeight: '18px' }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {taskOption.description}
+                    </Typography.Text>
+                  </div>
+                </div>
+              );
+            },
+          }}
         />
         <ProFormSelect
           name="streamId"

@@ -10,6 +10,7 @@ import {
   getForecastActivationStatusText,
   isForecastActivationPending,
 } from '../components/forecastActivation';
+import { formatForecastSchedule } from '../components/forecastSchedule';
 import {
   createForecastIdempotencyKey,
   createForecastStream,
@@ -385,8 +386,16 @@ const ForecastSources: React.FC = () => {
             style={{ marginBottom: 16 }}
             items={[
               { key: 'timezone', label: '时区', children: selectedProfile.timeZone },
-              { key: 'sync', label: '同步计划', children: selectedProfile.syncCron },
-              { key: 'forecast', label: '预测计划', children: selectedProfile.forecastCron },
+              {
+                key: 'sync',
+                label: '同步计划',
+                children: formatForecastSchedule(selectedProfile.syncCron),
+              },
+              {
+                key: 'forecast',
+                label: '预测计划',
+                children: formatForecastSchedule(selectedProfile.forecastCron),
+              },
             ]}
           />
           {health?.workerHealthy === false && (
