@@ -1,8 +1,8 @@
 /**
- * 出入库预测模块壳层样式。
+ * 模块级工作台壳层样式。
  *
- * 职责：复刻已确认的左侧模块导航方案，统一三个子页面的紧凑页头与满高内容区，
- * 并在导航完全隐藏后让业务内容无缝回收侧栏宽度。
+ * 职责：统一一级模块的左侧导航、紧凑页头与满高内容区，并在导航完全隐藏后让业务内容
+ * 无缝回收侧栏宽度；样式由 Forecast 与 AI 语义建模共同复用。
  */
 @global-header-height: 56px;
 @module-navigation-width: 216px;
@@ -13,28 +13,28 @@
 @navigation-fade-duration: 160ms;
 @navigation-transition-easing: cubic-bezier(0.2, 0, 0, 1);
 
-:global(body.ss-forecast-page-scroll-lock),
-:global(body.ss-forecast-page-scroll-lock #root) {
+:global(body.ss-module-workspace-page-scroll-lock),
+:global(body.ss-module-workspace-page-scroll-lock #root) {
   height: 100%;
   overflow: hidden;
 }
 
-:global(body.ss-forecast-page-scroll-lock .ant-design-pro),
-:global(body.ss-forecast-page-scroll-lock .ant-pro-layout-container),
-:global(body.ss-forecast-page-scroll-lock .ant-layout) {
+:global(body.ss-module-workspace-page-scroll-lock .ant-design-pro),
+:global(body.ss-module-workspace-page-scroll-lock .ant-pro-layout-container),
+:global(body.ss-module-workspace-page-scroll-lock .ant-layout) {
   height: 100%;
   max-height: 100vh;
   min-height: 0;
   overflow: hidden;
 }
 
-:global(body.ss-forecast-page-scroll-lock .ant-pro-layout-content) {
+:global(body.ss-module-workspace-page-scroll-lock .ant-pro-layout-content) {
   height: calc(100vh - @global-header-height);
   min-height: 0;
   overflow: hidden;
 }
 
-.forecastShell {
+.moduleWorkspace {
   display: flex;
   width: 100%;
   height: calc(100vh - @global-header-height);

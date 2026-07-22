@@ -1,321 +1,45 @@
-# Forecast 数据接入 UI 设计 QA
+# AI 语义建模菜单视觉 QA
 
-## QA 基线
+- source visual truth path: `/var/folders/yc/pjkcftks6cxf8hx1qqhj_dmc0000gn/T/codex-clipboard-39460526-7008-407d-8655-d4d11e7eec23.png`
+- implementation screenshot path: `/Users/bu_jiangjiu/.codex/visualizations/2026/07/22/019f893e-64be-7363-8ad2-456d1854296e/ai-semantic-modeling-gap-pool-final.png`
+- full-view comparison evidence: `/Users/bu_jiangjiu/.codex/visualizations/2026/07/22/019f893e-64be-7363-8ad2-456d1854296e/design-qa-full-comparison.png`
+- focused navigation comparison evidence: `/Users/bu_jiangjiu/.codex/visualizations/2026/07/22/019f893e-64be-7363-8ad2-456d1854296e/design-qa-navigation-comparison.png`
+- viewport: `1719 x 773` CSS px, `devicePixelRatio = 1`
+- source pixels: `1719 x 771`
+- implementation pixels: `1686 x 758`（应用内浏览器截图接口裁掉滚动条占位；页面内读取的 CSS viewport 仍为 `1719 x 773`）
+- density normalization: 全页对照把两张截图等比例放入相同宽度容器；聚焦对照以 `1719px` 逻辑宽度对齐左上角，implementation 仅做约 `1.96%` 等比补偿，不据此判断字体绝对像素差异
+- state: 参考图为“出入库预测”左侧导航展开且“AI 语义建模”旧下拉展开；实现图为“AI 语义建模”左侧导航展开、语义缺口池选中，顶部只保留一级入口
 
-- 参考图（主页面）：`/Users/bu_jiangjiu/.codex/generated_images/019f8294-16af-7c11-80fc-243c40ad0429/exec-ac9ef147-4d8d-4d7c-837b-30bb593ae0c7.png`
-- 参考图（字段映射）：`/Users/bu_jiangjiu/.codex/generated_images/019f8294-16af-7c11-80fc-243c40ad0429/exec-d8be19ac-7429-4dd5-9963-76edc17cf82d.png`
-- 实现页面：`http://localhost:9000/webapp/forecast/sources`
-- 桌面对照视口：`1692 × 930`
-- 同屏对照证据：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-design-comparison.png`
+## Findings
 
-## 第一轮发现与修正
+- 未发现可执行的 P0、P1 或 P2 差异。
+- 顶部“AI 语义建模”已经从带子菜单的悬浮入口变为普通一级链接，目标中的三个子入口已迁移到固定左侧导航。
+- 左侧导航复用出入库预测的同一工作台组件，宽度、64px 菜单行高、选中背景、左侧主色标记、分隔线、页头节奏和收起入口一致。
+- 参考图与实现图中的业务内容、菜单图标和文字不同，属于模块语义差异；实现使用 Ant Design 现有图标库，没有新增或近似绘制图形资产。
 
-| 严重度 | 范畴              | 发现                                                                                      | 修正与验证                                                                                    |
-| ------ | ----------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| P1     | 行为 / 数据完整性 | 高级映射放入折叠区后，未展开的字段可能不挂载，保存草稿存在遗漏历史高级配置的风险。        | 折叠内容改为持续挂载；真实页面展开后确认固定方向、删除标记等历史值仍被完整回填。              |
-| P2     | 内容 / 可读性     | 服务端持久化校验摘要以 `errors=...; warnings=... \| ...` 返回时，右栏会显示为一整段文本。 | 增加兼容解析，将错误和警告逐条展示；真实 v3 映射显示 `0 errors / 3 warnings / 5/5 核心字段`。 |
-| P2     | 布局              | 原抽屉形态和早期底栏布局压缩了表单宽度，并可能遮挡 Profile 分页。                         | 改成主从工作区内的原位映射页；底部操作栏固定在页面底部并为工作区预留空间，内容区独立滚动。    |
-| P2     | 视觉密度          | Profile 卡片操作图标常驻会削弱列表扫描层级，与参考图的选择优先模式不一致。                | 操作图标改为悬停或键盘聚焦时出现，同时保留 `title`、`aria-label` 和键盘可达性。               |
+## Required Fidelity Surfaces
 
-## 最终对照结论
+- Fonts and typography: 沿用项目现有 Ant Design 字体栈、标题层级、字重和单行截断规则；参考图的浏览器缩放比例更大，因此不把绝对物理像素差异判定为回归。
+- Spacing and layout rhythm: 左侧导航、紧凑页头、内容内边距、选中行高与出入库预测共用同一组件和同一 LESS 令牌；在 `1719 x 773` CSS 视口未出现遮挡或持久控件溢出。
+- Colors and visual tokens: 复用预测模块的 `#296df3` 主色、`#fafafb` 工作台背景、白色导航背景和 `#edf0f5` 分隔线。
+- Image quality and asset fidelity: 页面仅使用已有品牌 Logo 与 Ant Design 矢量图标；没有新增位图、占位图、CSS 图形或手工 SVG。
+- Copy and content: “语义缺口池 / 建模草稿 / 发布审计”与原路由文案一致；新增页头辅助说明分别对应缺口沉淀、草稿校准验证和发布治理职责。
 
-- 布局：Profile 主列表、详情工作区、六项摘要、数据流表格、映射三段表单、校验右栏和固定底栏均与参考图保持同一信息层级。
-- 字体与颜色：沿用项目 Ant Design 字体、主色和状态色；未引入新的品牌色、图片占位或自绘图标。
-- 内容：参考图中的版本、任务和警告数量为示意数据；实现图展示真实 v3 配置与三条实际警告，属于动态内容差异。
-- 交互：已验证 Profile 切换、进入/返回字段映射、高级映射展开、版本与只读状态回填；未触发保存、发布或激活写操作。
-- 可访问性：主列表使用语义按钮和 `aria-pressed`，图标操作包含可访问名称，表单保留标签、必填状态、帮助提示和可见焦点。
-- 视口：`1692 × 930` 与产品全局最小支持宽度 `1280 × 800` 均无页面级横向溢出；小于 1280px 时项目全局 `body { min-width: 1280px; }` 会按既有桌面端策略滚动。
+## Interaction And Runtime Checks
 
-## 最终结果
+- 验证 `/webapp/ai-semantic-modeling/gaps`、`/drafts`、`/releases` 三个子页面均可由左侧菜单切换，URL、页头标题和选中态同步。
+- 验证发布审计入口在当前系统管理员账号可见；代码层仍由 Umi `SYSTEM_ADMIN` access 与路由权限双重约束。
+- 验证收起后导航 `aria-hidden=true` 且展开按钮出现；重新展开后导航宽度恢复为 `216px`，`aria-expanded=true`。
+- 验证顶部 AI 菜单元素为普通 `ant-menu-item`，`aria-haspopup` 为空、子菜单数量为 `0`。
+- 验证共享组件改造后的出入库预测仍显示“预测看板 / 数据接入 / 运行中心”，预测看板选中且导航宽度为 `216px`。
+- 浏览器控制台未出现本次导航改造导致的未捕获错误；仍存在原页面的 Ant Design deprecated API 与未连接 `useForm` 基线警告，不属于本次菜单范围。
 
-**PASS**：同屏复核后无未解决的 P0、P1 或 P2 设计缺陷。
+## Comparison History
 
-## 按钮去重验证（2026-07-21）
+- Pass 1: 全页与导航聚焦对照未发现 P0/P1/P2；无需视觉修复迭代。
 
-### 对照基线
+## Follow-up Polish
 
-- 源视觉真值：`/var/folders/yc/pjkcftks6cxf8hx1qqhj_dmc0000gn/T/codex-clipboard-9faf6295-dbe9-4971-9d9d-865281a280df.png`
-- 目标差异：删除右侧栏重复的“校验并预览”和“保存草稿”；底部固定操作栏继续承载这两个编辑动作。
-- 实现截图：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-field-mapping-deduplicated.png`
-- 同屏对照证据：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-field-mapping-dedup-comparison.png`
-- 浏览器视口：`1280 × 720`；截图内容区域为 `1253 × 705`。
-- 页面状态：首个 Profile、入库任务、活动映射 `v1 · PUBLISHED · 有效`，未触发任何保存、校验、发布或激活写操作。
-
-### Findings
-
-- 原实现存在一项 P2 交互层级问题：右侧栏和底部固定栏分别提供同名、同处理函数的“保存草稿”和“校验并预览”，用户无法判断哪个区域是主操作入口。
-- 修正后无未解决的 P0、P1 或 P2：底部固定栏中的两个编辑动作各保留一次；右侧栏只保留“发布新版本”和映射激活状态操作。
-- 浏览器语义核对结果：`保存草稿 = 1`、`校验并预览 = 1`、`发布新版本 = 1`。
-
-### 必查视觉面
-
-- 字体与排版：未修改字体、字号、字重、行高或文本截断策略。
-- 间距与布局：仅移除两个重复按钮，右侧栏保留既有纵向动作间距；底部固定栏位置与尺寸未变化。
-- 颜色与状态令牌：继续沿用 Ant Design 主按钮、普通按钮和禁用态令牌，没有新增颜色。
-- 图片与资产：本次没有新增、替换或近似重绘任何图片、Logo 或图标。
-- 文案与内容：编辑动作仍为“保存草稿 / 校验并预览”，发布生命周期动作仍为“发布新版本 / 当前版本已激活”。
-
-### 对照历史
-
-1. 修正前：源图中右侧栏和底部栏同时出现“保存草稿 / 校验并预览”。
-2. 代码修正：删除右侧栏的两个重复按钮，保留其原有业务处理函数供底部栏调用。
-3. 修正后：同屏视觉对照确认底部操作栏保持不变；真实浏览器 DOM 确认两个编辑动作各仅存在一个，发布与激活动作仍存在。
-
-### 聚焦区域说明
-
-本次差异仅涉及右侧动作区和底部固定栏，同屏对照图已能清晰辨认按钮数量与位置，因此无需额外裁剪聚焦图。
-
-final result: passed
-
-## 字段映射底栏作用域验证（2026-07-21）
-
-### 对照基线
-
-- 源视觉真值：`/var/folders/yc/pjkcftks6cxf8hx1qqhj_dmc0000gn/T/codex-clipboard-3824345d-d7ea-4a6f-8a92-9fc66210392b.png`
-- 目标差异：底部操作栏只属于右侧字段映射工作区，不再横跨左侧 Profile 列；映射内容独立滚动时底栏保持不动。
-- 实现截图：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-field-mapping-scoped-footer.png`
-- 滚动状态截图：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-field-mapping-scoped-footer-scrolled.png`
-- 同屏对照证据：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-field-mapping-scoped-footer-comparison.png`
-- 浏览器视口：`1280 × 720`；截图内容区域为 `1253 × 705`。
-- 页面状态：首个 Profile、入库任务、活动映射 `v1 · PUBLISHED · 有效`，未触发任何保存、校验、发布或激活写操作。
-
-### Findings
-
-- 原实现存在一项 P2 布局作用域问题：底栏使用视口级 `position: fixed` 和页面左右偏移，视觉上跨越 Profile 列与字段映射详情区。
-- 修正后无未解决的 P0、P1 或 P2：底栏成为字段映射工作区的非伸缩 flex 子项，仅中间映射内容区滚动。
-- 几何核对结果：Profile 右边界、字段映射详情左边界和底栏左边界均为 `329px`；详情区与底栏宽度均为 `910px`，右边界均为 `1239px`。
-- 滚动核对结果：滚动到“3. 标准事件字段”后，底栏仍保持 `x=329px`、`y=605px`、`width=910px`、`height=64px`，没有覆盖左侧分页或随内容移动。
-
-### 必查视觉面
-
-- 字体与排版：未修改字体、字号、字重、行高、按钮文案或文本截断策略。
-- 间距与布局：底栏左右边界改为跟随字段映射详情容器；保留原 `64px` 高度和 `12px 24px` 内边距。
-- 颜色与状态令牌：继续沿用原白色背景、边框、阴影及 Ant Design 按钮状态色。
-- 图片与资产：本次没有新增、替换或重绘任何图片、Logo 或图标。
-- 文案与内容：时间信息和“取消 / 保存草稿 / 校验并预览”保持不变。
-
-### 对照历史
-
-1. 修正前：操作栏通过视口级 fixed 定位横跨 Profile 列和字段映射详情区，并需要额外为整个主从工作区预留底部间距。
-2. 代码修正：移除视口级定位及映射态额外底部间距；利用既有纵向 flex 高度链，让滚动区占满剩余空间、底栏固定为详情区末端的非伸缩子项。
-3. 修正后：同屏视觉对照和实际元素边界均确认底栏只覆盖字段映射详情区；内容滚动前后底栏几何位置不变。
-
-### 聚焦区域说明
-
-本次核心差异是主从分栏与底栏左边界的关系；同屏对照图可清晰看到完整分栏、分页与底栏边界，滚动状态另有独立截图，因此无需额外裁剪聚焦图。
-
-final result: passed
-
-## 校验与发布动作统一验证（2026-07-21）
-
-### 对照基线
-
-- 源视觉真值：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/audit/01-footer-action-hierarchy.png`
-- 目标差异：右侧栏只展示校验结果；取消、保存、校验、发布和激活动作统一由字段映射底栏承载；当前版本已激活时改为状态标签。
-- 实现截图：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-field-mapping-unified-actions.png`
-- 同屏对照证据：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-field-mapping-unified-actions-comparison.png`
-- 浏览器视口：`1280 × 720`；截图内容区域为 `1253 × 705`。
-- 页面状态：首个 Profile、入库任务、活动映射 `v1 · PUBLISHED · 有效`，未触发任何保存、校验、发布或激活写操作。
-
-### Findings
-
-- 原实现存在一项 P2 操作层级问题：发布与激活动作位于右侧栏，取消、保存和校验位于底栏，同一版本工作流被拆成两个操作入口。
-- 修正后无未解决的 P0、P1 或 P2：右侧栏改为“校验结果”，底栏统一承载版本工作流动作。
-- 当前版本已经激活时不再渲染不可操作的“当前版本已激活”按钮，而是在底栏元信息区显示绿色状态标签。
-- 底栏根据状态只突出一个主动作：可激活时突出激活，可发布时突出发布，其余状态突出校验；所有 loading、禁用条件和激活提示继续复用原有状态机。
-- `1280px` 视口几何核对：底栏宽度 `910px`、内容宽度与滚动宽度均为 `910px`，不存在横向溢出；四个可见按钮宽度均为 `104px`。
-
-### 必查视觉面
-
-- 字体与排版：沿用原 Ant Design 字体、字号和按钮文本样式；底栏元信息允许省略，操作按钮保持单行。
-- 间距与布局：底栏维持原高度、内边距和右对齐节奏；状态标签位于时间信息旁，操作组保持非伸缩且不换行。
-- 颜色与状态令牌：主动作继续使用项目主色；已激活状态使用既有 success 令牌，禁用发布保持 Ant Design 禁用态。
-- 图片与资产：没有新增或替换图片、Logo、插画及非标准图标；状态图标复用现有 Ant Design 图标。
-- 文案与内容：右侧标题由“校验与发布”改为“校验结果”；原保存、校验、发布和激活文案保持业务语义。
-
-### 对照历史
-
-1. 修正前：右侧栏显示“校验与发布”及发布、激活按钮，底栏仅显示取消、保存和校验。
-2. 代码修正：将发布和激活动作移动到底栏；把已激活按钮替换成状态标签；增加发布禁用原因并按状态切换唯一主按钮。
-3. 修正后：真实浏览器确认旧“校验与发布”区域数量为 `0`、“校验结果”区域数量为 `1`、发布按钮数量为 `1`，已激活状态标签数量为 `1`，底栏无横向溢出。
-
-### 聚焦区域与验证边界
-
-同屏对照图能够清晰辨认右侧标题和完整底栏，因此无需额外裁剪聚焦图。当前真实数据只覆盖“已发布且已激活”状态；草稿、待发布和待激活按钮文案由既有状态机的 `4` 项单元测试覆盖，但没有通过写入测试数据进行额外视觉截图。
-
-final result: passed
-
-## 解释说明按需展示验证（2026-07-21）
-
-### 对照基线
-
-- 源视觉真值（数据流页）：`/var/folders/yc/pjkcftks6cxf8hx1qqhj_dmc0000gn/T/codex-clipboard-b621a981-f976-4714-b821-565b6bb07ab6.png`
-- 源视觉真值（字段映射页）：`/var/folders/yc/pjkcftks6cxf8hx1qqhj_dmc0000gn/T/codex-clipboard-d51bac6d-6831-44e9-be52-d348a4047e03.png`
-- 实现截图（数据流页）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-sources-inline-help.png`
-- 实现截图（字段映射页）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-field-mapping-inline-help.png`
-- 全视图对照（数据流页）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-sources-help-comparison.png`
-- 全视图对照（字段映射页）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-field-mapping-help-comparison.png`
-- 聚焦对照（数据流页）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-sources-help-focused-comparison.png`
-- 聚焦对照（字段映射页）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-field-mapping-help-focused-comparison.png`
-- 浏览器视口：`1280 × 720`；截图内容区域为 `1253 × 705`。
-- 页面状态：首个 Profile、入库任务、活动映射 `v1 · PUBLISHED · 有效`；未触发保存、校验、发布或激活写操作。
-
-### Findings
-
-- 原实现存在一项 P2 视觉密度问题：两条不会随运行状态变化的解释文案分别占用整行 Alert，压缩了数据流表格和字段映射表单的首屏空间。
-- 修正后无未解决的 P0、P1 或 P2：数据流安全说明放到“数据流管理”标题后的问号，版本编辑说明放到版本选择器后的问号。
-- 运行态告警、失败信息、校验结果与 Worker 离线提示仍保持常驻，未把会影响当前决策的信息隐藏进 Tooltip。
-- 真实浏览器 DOM 核对：数据流常驻说明可见数量为 `0`、安全说明按钮为 `1`；字段映射常驻说明可见数量为 `0`、版本说明按钮为 `1`。
-- 问号按钮显式支持 `hover` 与 `focus` 两种触发方式；键盘聚焦后，两处 Tooltip 均显示完整文案，焦点轮廓清晰可见。
-
-### 必查视觉面
-
-- 字体与排版：沿用 Ant Design 既有字体、字号、字重与 Tooltip 文本排版，没有引入新的截断或换行规则。
-- 间距与布局：移除两个整行 Alert；问号与标题/选择器保持 `4px` 紧凑间距，版本栏其余摘要与状态列不变。
-- 颜色与状态令牌：问号默认使用次级文本色，悬停和可见焦点使用项目主色；告警与成功状态继续使用既有语义色。
-- 图片与资产：未新增或近似重绘任何图片、Logo、插画；问号复用 Ant Design `QuestionCircleOutlined`。
-- 文案与内容：原两条解释文案完整迁移到 Tooltip，没有删减；业务告警与操作文案未改变。
-
-### 对照历史
-
-1. 修正前：数据流摘要与表格之间、版本栏与映射表单之间各有一条整行静态说明。
-2. 代码修正：删除两条静态 Alert，增加带 `title`、`aria-label` 以及 `hover/focus` 触发器的问号按钮。
-3. 修正后：全视图对照确认首屏纵向空间回收；聚焦对照与真实浏览器焦点态确认完整说明仍可按需查看。
-
-### 交互、控制台与验证边界
-
-- 已验证的主要交互：进入/返回字段映射、数据流说明键盘聚焦、版本说明键盘聚焦，以及 Tooltip 文案显示。
-- 当前内置浏览器诊断接口不提供 console/pageerror 读取能力；尝试订阅时明确返回仅支持 `download` 与 `filechooser`。本次真实页面操作未出现错误边界或异常提示，且生产构建通过；独立控制台日志导出作为 P3 工具能力缺口记录，不构成当前纯展示调整的阻断项。
-- 源图来自较宽视口且包含红色标注，实现截图来自 `1280 × 720` 内置浏览器；因此全视图只用于判断信息层级与空间回收，问号位置、文案和焦点态以聚焦对照为准。
-
-final result: passed
-
-## Forecast 模块导航与紧凑页头验证（2026-07-21）
-
-### 对照基线
-
-- 源视觉真值（导航展开）：`/Users/bu_jiangjiu/.codex/generated_images/019f8294-16af-7c11-80fc-243c40ad0429/exec-6a6f3cd5-c3a1-45df-bfae-641d86a5a1e6.png`
-- 源视觉真值（导航收起）：`/Users/bu_jiangjiu/.codex/generated_images/019f8294-16af-7c11-80fc-243c40ad0429/exec-59cd5c99-f4e4-496a-bed0-e1f4d2b61c59.png`
-- 实现截图（导航展开）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-module-navigation-expanded.png`
-- 实现截图（导航收起）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-module-navigation-collapsed.png`
-- 全视图对照（导航展开）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-module-navigation-expanded-comparison.png`
-- 全视图对照（导航收起）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-module-navigation-collapsed-comparison.png`
-- 聚焦对照（导航展开）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-module-navigation-expanded-focused-comparison.png`
-- 聚焦对照（导航收起）：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f8294-16af-7c11-80fc-243c40ad0429/forecast-module-navigation-collapsed-focused-comparison.png`
-- 浏览器视口：主对照 `1672 × 941`；最小桌面回归 `1280 × 720`。
-- 页面状态：真实 Profile、数据流和运行任务；未触发创建、保存、发布、激活、取消或重试等写操作。
-
-### Findings
-
-- 修正后无未解决的 P0、P1 或 P2：全局顶部“出入库预测”已成为直接链接，不再展开“预测看板 / 数据接入 / 运行中心”下拉列表；三个页面改由模块左侧导航切换。
-- 三个子页面共用 `88px` 紧凑页头，原 PageContainer 大块留白已移除；真实页面中页头固定从全局导航下方 `y=56px` 开始，业务工作区从 `y=144px` 开始。
-- 导航展开时宽度为 `216px`，数据接入工作区宽度为 `1393px`；完全收起后模块导航节点数量为 `0`，工作区扩展为 `1609px`，内容真实回收侧栏空间。
-- 收起状态刷新页面后仍保持隐藏，展开按钮保持可见；重新展开后三个菜单项、选中态和动态页头均恢复正常。
-- `1280 × 720` 字段映射回归中页面级 `scrollWidth = 1280px`，底部操作栏仍只属于详情区；校验结果自动移到表单下方，未发生横向溢出或按钮换行。
-
-### 必查视觉面
-
-- 字体与排版：继续使用项目 Tencent Sans / 系统中文字体链和 Ant Design 字号、字重；页标题、副标题、菜单、Profile 与表格均保持单行层级和既有省略策略。
-- 间距与布局：左侧导航、`88px` 页头、`24px` 内容边距、Profile 主从列和满高内容区与选定方案保持同一结构；收起后仅保留页头展开按钮。
-- 颜色与状态令牌：选中导航沿用项目主色 `#296df3`、浅蓝选中面与现有成功/警告状态色，没有引入新的品牌色或阴影体系。
-- 图片与资产：保留现有 WmsHub Logo；模块导航和显隐按钮全部复用 `@ant-design/icons`，没有自绘 SVG、CSS 图标或图片占位。
-- 文案与内容：菜单使用“预测看板 / 数据接入 / 运行中心”，动态页头继续使用各页面原有标题和说明，真实业务数据未改写。
-- 响应式与可访问性：侧栏显隐按钮包含 `aria-controls`、`aria-expanded` 和可访问名称；菜单使用语义 `menuitem`，键盘焦点与 Ant Design 默认可见焦点保留。
-
-### 对照历史
-
-1. 第一轮真实页面对照确认模块导航、紧凑页头和收起后的空间回收已实现，但发现项目根节点的三层水平滚动容器可能保留 `30px` 纵向滚动，导致固定全局顶栏覆盖模块页头，判定为 P2。
-2. 修正时为 Forecast 模块增加挂载期滚动隔离和卸载清理，并在进入工作台时归零根滚动；离开到数据库管理页后确认 body class 已移除、根容器恢复原有滚动策略。
-3. 修正后展开和收起状态的页头均稳定为 `y=56px`、高度 `88px`，根节点 `scrollTop=0`，重新截取两组全视图与聚焦对照，原 P2 已关闭。
-
-### 交互、控制台与验证边界
-
-- 已验证：顶部菜单不再出现子级下拉、模块三个页面切换、侧栏完全收起/重新展开、刷新后的显隐记忆、字段映射进入、`1280px` 自适应、离开模块后的滚动锁清理。
-- 预测看板、数据接入和运行中心均使用真实接口数据完成首屏渲染；生产构建与 Forecast 现有 `12` 项单元测试通过。
-- 浏览器仅记录到 Ant ProTable `DensityIcon` 的既有 `forwardRef` 开发期警告，堆栈来自第三方工具栏且与本次模块壳层无关；页面无错误边界、白屏或交互失败，作为 P3 基线噪声保留。
-- 展开导航底部新增“收起导航”文字入口，比静态方案图多一个明确操作提示，属于实现可用性补充，不改变信息架构或主内容比例。
-
-final result: passed
-
-## 预测基准与历史回测方案 2 验证（2026-07-21）
-
-### 对照基线
-
-- 源视觉真值：`/Users/bu_jiangjiu/.codex/generated_images/019f832c-81cb-7de0-911a-b8dfc70c6e1b/exec-42563f7e-2826-4a21-88d9-159ccfb19ee9.png`
-- 实现截图：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f832c-81cb-7de0-911a-b8dfc70c6e1b/forecast-scheme2-implementation.png`
-- 同屏对照证据：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/21/019f832c-81cb-7de0-911a-b8dfc70c6e1b/forecast-scheme2-comparison.png`
-- 响应式证据：`forecast-scheme2-tablet-1280.png`（`1280 × 800`）与 `forecast-scheme2-mobile-768.png`（`768 × 900`），均位于上述实现截图目录。
-- 主视觉视口：`1692 × 930`，与源视觉真值一致；页面状态为真实 Profile、数量、7 天、历史回测，回测起始日 `2025-11-09`。
-
-### Findings
-
-- 修正后无未解决的 P0、P1 或 P2：预测看板在既有 Forecast 模块壳层内增加弱蓝色预测基准条，并完整保留 Profile、周期、指标、KPI、趋势图和分解表的信息层级。
-- “跟随数据”会把预测锚点放在最后完整业务日的下一天；当前真实数据截至 `2025-11-15`，对应预测区间为 `2025-11-16` 至 `2025-11-22`，不再默认跳到今天后显示空效果。
-- “历史回测”默认选择最近一个具有完整实际值的 7 日窗口，训练截止、回测窗口和可用实际截止日同时可见；真实回测预测总量为 `8,672,250.22`、同期实际为 `11,759,477`、WAPE 为 `33.49%`。
-- 数据不足时切换 14/30 天不会提交无效回测或清空图表，而是保留当前 7 天有效状态并给出明确提示。
-- “今天”仍可用于真实未来外推，但在业务数据滞后时持续显示风险说明；低置信度移动平均也通过页面 Alert 明示，没有用视觉优化隐藏模型风险。
-- 同尺寸对照后缩短了重复年份文案并允许日期上下文自然换行，训练、回测和实际截止日期不再被省略号截断。
-- `1280px` 下基准条自动分成上下两行；`768px` 下操作区换行、三张 KPI 卡纵向堆叠，核心日期、按钮和状态标签均保持可见。
-
-### 必查视觉面
-
-- 字体与排版：沿用项目现有字体、Ant Design 字号和字重；重复日期只在同一上下文中省略年份，完整年份仍由日期选择器和 KPI 标题提供。
-- 间距与布局：基准条使用 `16px 20px` 内边距、`16px` 区块间距和既有 `6px` 圆角；模块左侧导航属于当前产品壳层，因此实现比静态效果图多出导航列。
-- 颜色与状态令牌：弱蓝背景与边框用于日期上下文，预测为红色虚线、实际为黄色实线、分界为主色蓝；Worker、同步和业务数据新鲜度继续使用现有成功/警告语义色。
-- 图片与资产：保留既有 WmsHub Logo 和 Ant Design 图标，没有新增自绘 SVG、CSS 图标或占位资产。
-- 文案与内容：基准模式、训练截止、回测区间、实际截止、模型警告及 KPI 日期均来自真实接口数据，不使用效果图中的模拟数值。
-
-### 对照历史
-
-1. 第一轮同尺寸对照确认整体结构、蓝色基准条、三项 KPI 和实际/预测趋势与方案一致，但发现日期上下文因既有模块侧栏压缩而出现省略。
-2. 第二轮改为保留全部日期语义、压缩重复年份，并让上下文在空间不足时自然换行；同轮把 KPI 栅格断点从 `md` 调整为 `lg`，避免窄内容区仍强制三列。
-3. 最终对照确认日期语义完整、桌面单行紧凑、`1280px` 两行清晰、`768px` KPI 纵向堆叠，未发现遮挡、错位或不可访问的核心操作。
-
-### 交互、控制台与验证边界
-
-- 已验证：跟随数据、历史回测、今天三种基准；7/14/30 天；数量/任务数；回测起始日；生成回测；数据不足拦截；真实 30 天预测区间。
-- 修复 Ant Design 静态 message/notification 调用后，以新页面加载时间为边界重新采集 `error`/`warn` 日志，结果为 `0` 条。
-- 主图使用真实业务序列，因此形状和量级不会复刻静态效果图的演示数据；本次对照目标是信息架构、日期上下文、视觉层级和交互状态，而非伪造相同曲线。
-- 预览与历史回测均为只读计算，不写入正式预测结果；定时任务下一次运行时才会按新的“最后业务日 + 1 天”规则发布正式结果。
-
-final result: passed
-
-## 最近激活任务列单行居中验证（2026-07-22）
-
-### 对照基线
-
-- 修正前问题截图：`/var/folders/yc/pjkcftks6cxf8hx1qqhj_dmc0000gn/T/codex-clipboard-ba041d37-c014-4fe7-a836-9f338329d313.png`。
-- 修正后完整截图：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/22/019f8905-6855-7f41-b5ad-4197f2c34fce/forecast-activation/forecast-activation-single-line-centered-1971x717.png`。
-- 聚焦区域同屏对照：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/22/019f8905-6855-7f41-b5ad-4197f2c34fce/forecast-activation/forecast-activation-before-after-comparison.png`。
-- 源图像素尺寸与验证用 CSS 视口均为 `1971 × 717`，设备像素比为 `1`；浏览器表面截图因窗口内边界实际输出 `1930 × 702`，聚焦对照仅将两侧列裁切统一为 `260px` 宽，没有用缩放结果判断全页几何。
-- 目标页面：`http://localhost:9000/webapp/forecast/sources`；选中 `AJRW-出入库预测-20260720`，入库、出库两行均为成功终态。
-
-### 本轮实现
-
-- 最近激活任务改为单个不可换行的横向内容组，依次展示“任务号、中文状态、映射版本与激活结果”。
-- 内容组在单元格内水平、垂直居中；任务入口和状态标签不收缩，末尾状态文案仅在更窄容器内单行省略，并通过 Tooltip 保留完整信息。
-- 原始 `SUCCEEDED` 等后端枚举转换为等待中、进行中、取消中、已成功、失败、已取消等业务文案；运行百分比继续合并在状态文案中，失败详情保留在 Tooltip。
-- 任务入口保留 `title` 和 `aria-label`，状态标签使用 Ant Design `filled` 变体，避免引入已弃用属性。
-
-### 必查视觉面
-
-- 字体与排版：沿用 Ant Design 链接、Tag 和次级文本样式，三段内容保持同一行、同一视觉基线，没有出现字形遮挡或异常字重。
-- 间距与布局：三段间距为 `8px`；两行实测内容组宽 `244px`、高 `24px`，所在单元格宽 `260px`、高 `57px`，水平中心偏差小于 `0.01px`，所有子项垂直中心偏差为 `0px`。
-- 颜色与状态令牌：继续使用 Ant Design 的 default、processing、warning、success 和 error 语义色，没有新增品牌色。
-- 图片与资产：本次没有图片、Logo、插画或非标准图标的新增、替换与近似重绘。
-- 文案与内容：任务编号、映射版本、进度和错误详情仍来自真实接口，只做状态本地化和紧凑编排。
-
-### Findings
-
-- P2（已修复）：修正前内容容器采用纵向布局并左对齐，任务信息被拆成两行，且与列标题的居中基准不一致。
-- 修正后两行的 `flex-direction` 均为 `row`，`justify-content` 与 `align-items` 均为 `center`，`clientWidth` 与 `scrollWidth` 同为 `244px`，不存在换行或横向溢出。
-- 当前没有遗留的 P0、P1 或 P2 视觉差异。默认较窄内容区仅允许末尾状态文案省略，不会换行，完整内容仍可通过 Tooltip 查看。
-
-### 对照历史与交互验证
-
-1. 第一轮同尺寸对照确认问题截图中的任务信息为两行且左偏，列内留白不对称。
-2. 第二轮改为单行弹性布局，并以真实单元格几何数据确认内容组精确居中。
-3. “任务 #7”入口已验证可进入 `/webapp/forecast/runs?profileId=2`，返回后列表状态保持正常。
-4. 定向 Jest `4/4`、Prettier、`git diff --check` 和 `pnpm run build:os` 均通过；控制台未发现由本次单行居中修改新增的错误。
+- 无阻断项；参考图中的红色标注和不同浏览器缩放不属于产品 UI。
 
 final result: passed

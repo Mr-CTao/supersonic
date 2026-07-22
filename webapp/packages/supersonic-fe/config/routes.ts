@@ -264,18 +264,22 @@ const ROUTES = [
       {
         path: '/ai-semantic-modeling/gaps',
         name: 'semanticGapPool',
+        // 子页面由 AI 语义建模工作台的左侧导航承载，避免顶栏继续渲染悬浮下拉菜单。
+        hideInMenu: true,
         component: './AISemanticModeling/SemanticGapPool',
         envEnableList: [ENV_KEY.SEMANTIC],
       },
       {
         path: '/ai-semantic-modeling/drafts',
         name: 'modelingDrafts',
+        hideInMenu: true,
         component: './AISemanticModeling/ModelingDrafts',
         envEnableList: [ENV_KEY.SEMANTIC],
       },
       {
         path: '/ai-semantic-modeling/releases',
         name: 'releaseAudit',
+        hideInMenu: true,
         component: './AISemanticModeling/ReleaseAudit',
         envEnableList: [ENV_KEY.SEMANTIC],
         access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
