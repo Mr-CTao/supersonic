@@ -279,3 +279,43 @@ final result: passed
 - 预览与历史回测均为只读计算，不写入正式预测结果；定时任务下一次运行时才会按新的“最后业务日 + 1 天”规则发布正式结果。
 
 final result: passed
+
+## 最近激活任务列单行居中验证（2026-07-22）
+
+### 对照基线
+
+- 修正前问题截图：`/var/folders/yc/pjkcftks6cxf8hx1qqhj_dmc0000gn/T/codex-clipboard-ba041d37-c014-4fe7-a836-9f338329d313.png`。
+- 修正后完整截图：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/22/019f8905-6855-7f41-b5ad-4197f2c34fce/forecast-activation/forecast-activation-single-line-centered-1971x717.png`。
+- 聚焦区域同屏对照：`/Users/bu_jiangjiu/.codex/visualizations/2026/07/22/019f8905-6855-7f41-b5ad-4197f2c34fce/forecast-activation/forecast-activation-before-after-comparison.png`。
+- 源图像素尺寸与验证用 CSS 视口均为 `1971 × 717`，设备像素比为 `1`；浏览器表面截图因窗口内边界实际输出 `1930 × 702`，聚焦对照仅将两侧列裁切统一为 `260px` 宽，没有用缩放结果判断全页几何。
+- 目标页面：`http://localhost:9000/webapp/forecast/sources`；选中 `AJRW-出入库预测-20260720`，入库、出库两行均为成功终态。
+
+### 本轮实现
+
+- 最近激活任务改为单个不可换行的横向内容组，依次展示“任务号、中文状态、映射版本与激活结果”。
+- 内容组在单元格内水平、垂直居中；任务入口和状态标签不收缩，末尾状态文案仅在更窄容器内单行省略，并通过 Tooltip 保留完整信息。
+- 原始 `SUCCEEDED` 等后端枚举转换为等待中、进行中、取消中、已成功、失败、已取消等业务文案；运行百分比继续合并在状态文案中，失败详情保留在 Tooltip。
+- 任务入口保留 `title` 和 `aria-label`，状态标签使用 Ant Design `filled` 变体，避免引入已弃用属性。
+
+### 必查视觉面
+
+- 字体与排版：沿用 Ant Design 链接、Tag 和次级文本样式，三段内容保持同一行、同一视觉基线，没有出现字形遮挡或异常字重。
+- 间距与布局：三段间距为 `8px`；两行实测内容组宽 `244px`、高 `24px`，所在单元格宽 `260px`、高 `57px`，水平中心偏差小于 `0.01px`，所有子项垂直中心偏差为 `0px`。
+- 颜色与状态令牌：继续使用 Ant Design 的 default、processing、warning、success 和 error 语义色，没有新增品牌色。
+- 图片与资产：本次没有图片、Logo、插画或非标准图标的新增、替换与近似重绘。
+- 文案与内容：任务编号、映射版本、进度和错误详情仍来自真实接口，只做状态本地化和紧凑编排。
+
+### Findings
+
+- P2（已修复）：修正前内容容器采用纵向布局并左对齐，任务信息被拆成两行，且与列标题的居中基准不一致。
+- 修正后两行的 `flex-direction` 均为 `row`，`justify-content` 与 `align-items` 均为 `center`，`clientWidth` 与 `scrollWidth` 同为 `244px`，不存在换行或横向溢出。
+- 当前没有遗留的 P0、P1 或 P2 视觉差异。默认较窄内容区仅允许末尾状态文案省略，不会换行，完整内容仍可通过 Tooltip 查看。
+
+### 对照历史与交互验证
+
+1. 第一轮同尺寸对照确认问题截图中的任务信息为两行且左偏，列内留白不对称。
+2. 第二轮改为单行弹性布局，并以真实单元格几何数据确认内容组精确居中。
+3. “任务 #7”入口已验证可进入 `/webapp/forecast/runs?profileId=2`，返回后列表状态保持正常。
+4. 定向 Jest `4/4`、Prettier、`git diff --check` 和 `pnpm run build:os` 均通过；控制台未发现由本次单行居中修改新增的错误。
+
+final result: passed

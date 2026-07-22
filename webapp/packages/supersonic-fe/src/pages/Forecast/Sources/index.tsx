@@ -47,7 +47,6 @@ import {
   message,
   Pagination,
   Popconfirm,
-  Progress,
   Space,
   Spin,
   Tag,
@@ -58,13 +57,14 @@ import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import styles from './style.less';
 
-const ACTIVATION_STATUS_COLOR: Record<ForecastJobStatus, string> = {
-  QUEUED: 'default',
-  RUNNING: 'processing',
-  CANCELLING: 'warning',
-  SUCCEEDED: 'success',
-  FAILED: 'error',
-  CANCELLED: 'default',
+/** 最近激活任务使用的中文短状态，避免将后端枚举直接暴露给业务用户。 */
+const ACTIVATION_STATUS_META: Record<ForecastJobStatus, { color: string; label: string }> = {
+  QUEUED: { color: 'default', label: '等待中' },
+  RUNNING: { color: 'processing', label: '进行中' },
+  CANCELLING: { color: 'warning', label: '取消中' },
+  SUCCEEDED: { color: 'success', label: '已成功' },
+  FAILED: { color: 'error', label: '失败' },
+  CANCELLED: { color: 'default', label: '已取消' },
 };
 const ACTIVATION_POLL_INTERVAL_MS = 5000;
 const PROFILE_PAGE_SIZE = 20;
@@ -213,6 +213,14 @@ const ForecastSources: React.FC = () => {
 
   const streamColumns: ProColumns<ForecastStream>[] = useMemo(
     () => [
+      {
+        title: '序号',
+        key: 'sequence',
+        width: 72,
+        align: 'center',
+        // 当前数据流表格不分页，按渲染索引生成序号即可稳定反映页面展示顺序。
+        render: (_, __, index) => index + 1,
+      },
       { title: '数据流', dataIndex: 'name' },
       {
         title: '状态',
@@ -245,31 +253,39 @@ const ForecastSources: React.FC = () => {
         render: (_, row) => {
           const activation = row.latestActivation;
           if (!activation) return '-';
+          const statusMeta = ACTIVATION_STATUS_META[activation.status];
+          const statusText = getForecastActivationStatusText(activation);
+          // 运行进度已包含在状态文案中；失败详情收进 Tooltip，避免任一状态把紧凑表格撑成多行。
+          const statusTooltip = activation.errorMessage
+            ? `${statusText}：${activation.errorMessage}`
+            : statusText;
           return (
-            <Space orientation="vertical" size={2} style={{ width: '100%' }}>
-              <Space size={4} wrap>
-                <Tag color={ACTIVATION_STATUS_COLOR[activation.status]}>{activation.status}</Tag>
-                <Button
-                  type="link"
-                  size="small"
-                  style={{ padding: 0 }}
-                  onClick={() => history.push(`/forecast/runs?profileId=${row.profileId}`)}
-                >
-                  任务 #{activation.jobId}
-                </Button>
-                <Typography.Text type="secondary">
-                  {getForecastActivationStatusText(activation)}
-                </Typography.Text>
-              </Space>
-              {activation.status === 'RUNNING' && (
-                <Progress percent={activation.progressPercent} size="small" />
-              )}
-              {activation.status === 'FAILED' && activation.errorMessage && (
-                <Typography.Text type="danger" ellipsis={{ tooltip: activation.errorMessage }}>
-                  {activation.errorMessage}
-                </Typography.Text>
-              )}
-            </Space>
+            <div className={styles.activationTaskCell}>
+              <Button
+                aria-label={`在运行中心查看任务 #${activation.jobId}`}
+                className={styles.activationTaskLink}
+                type="link"
+                size="small"
+                title={`在运行中心查看任务 #${activation.jobId}`}
+                onClick={() => history.push(`/forecast/runs?profileId=${row.profileId}`)}
+              >
+                任务 #{activation.jobId}
+              </Button>
+              <Tag
+                variant="filled"
+                className={styles.activationTaskStatus}
+                color={statusMeta.color}
+              >
+                {statusMeta.label}
+              </Tag>
+              <Typography.Text
+                className={styles.activationTaskMeta}
+                type="secondary"
+                ellipsis={{ tooltip: statusTooltip }}
+              >
+                {statusText}
+              </Typography.Text>
+            </div>
           );
         },
       },
