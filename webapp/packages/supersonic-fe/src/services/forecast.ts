@@ -10,7 +10,14 @@ const FORECAST_BASE_URL = '/api/forecast';
 
 export type ForecastDirection = 'INBOUND' | 'OUTBOUND';
 export type ForecastMetric = 'QUANTITY' | 'TASK_COUNT';
-export type ForecastDataStatus = 'INSUFFICIENT_DATA' | 'LOW_CONFIDENCE' | 'READY';
+export type ForecastAnchorMode = 'LATEST_DATA' | 'BACKTEST' | 'TODAY';
+export type ForecastActualComparisonType = 'PREVIOUS_PERIOD' | 'FORECAST_PERIOD';
+export type ForecastDataStatus =
+  | 'INSUFFICIENT_DATA'
+  | 'LOW_CONFIDENCE'
+  | 'READY'
+  | 'STALE'
+  | 'FAILED';
 export type ForecastJobType =
   | 'INITIAL_SYNC'
   | 'INCREMENTAL_SYNC'
@@ -206,6 +213,35 @@ export type ForecastHealth = {
   latestSyncAt?: string;
   latestForecastAt?: string;
   freshnessStatus: 'FRESH' | 'STALE' | 'NEVER_SYNCED';
+};
+export type ForecastOverviewSnapshot = {
+  profileId: number;
+  metric: ForecastMetric;
+  /** 缺省表示全部方向，存在时表示快照仅统计该方向。 */
+  direction?: ForecastDirection;
+  horizon: number;
+  anchorMode: ForecastAnchorMode;
+  actualComparisonType: ForecastActualComparisonType;
+  dataStartDate?: string;
+  latestActualDate?: string;
+  trainingStartDate?: string;
+  trainingEndDate?: string;
+  forecastStartDate: string;
+  forecastEndDate: string;
+  actualStartDate: string;
+  actualEndDate: string;
+  businessDataLagDays?: number;
+  predictedTotal: number;
+  actualTotal: number;
+  dataStatus: ForecastDataStatus;
+  algorithm?: string;
+  wape?: number;
+  mae?: number;
+  bias?: number;
+  lastSyncAt?: string;
+  lastForecastAt?: string;
+  series: ForecastSeriesPoint[];
+  breakdown: ForecastBreakdown[];
 };
 export type ForecastDatabase = {
   id: number;
@@ -536,6 +572,16 @@ export const retryForecastJob = (id: number, key: string) =>
  */
 export const getForecastSummary = (params: Record<string, unknown>) =>
   request(`${FORECAST_BASE_URL}/overview/summary`, { method: 'GET', params });
+
+/**
+ * 查询指定预测基准下的一致性看板快照。
+ *
+ * @param params Profile、指标、窗口、预测基准、可选方向、回测起始日及自定义训练区间。
+ * @returns 日期上下文、KPI、趋势和仓库拆分统一响应 Promise。
+ * @throws 参数、权限、决策库或网络错误时 Promise rejected。
+ */
+export const getForecastOverviewSnapshot = (params: Record<string, unknown>) =>
+  request(`${FORECAST_BASE_URL}/overview/snapshot`, { method: 'GET', params });
 
 /**
  * 查询实际与预测曲线。

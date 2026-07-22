@@ -37,6 +37,7 @@ import { FORECAST_MAPPING_HELP } from './forecastMappingHelp';
 import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
+  CloseCircleOutlined,
   QuestionCircleOutlined,
   SwapRightOutlined,
   WarningOutlined,
@@ -50,6 +51,7 @@ import {
   Input,
   InputNumber,
   message,
+  notification,
   Progress,
   Segmented,
   Select,
@@ -86,6 +88,38 @@ const FIELD_OPTIONS = [
 const PRIMARY_FIELD_OPTIONS = FIELD_OPTIONS.slice(0, 6);
 const ADVANCED_FIELD_OPTIONS = FIELD_OPTIONS.slice(6);
 const REQUIRED_CORE_FIELD_COUNT = 5;
+const VALIDATION_SUCCESS_NOTIFICATION_KEY = 'forecast-mapping-validation-success';
+const VALIDATION_SUCCESS_NOTIFICATION_DURATION_SECONDS = 3;
+const VALIDATION_SUCCESS_NOTIFICATION_TOP_MARGIN_PX = 48;
+const VALIDATION_RESULT_SCROLL_OFFSET_PX = 16;
+const PREVIEW_FIELD_LABELS: Readonly<Record<string, string>> = {
+  sourceRecordId: '源记录唯一 ID',
+  taskId: '任务单 ID',
+  quantity: '数量',
+  occurredAt: '业务发生时间',
+  sourceUpdatedAt: '源更新时间',
+  warehouseCode: '仓库编码',
+  direction: '出入库方向',
+  sourceStatus: '源记录状态',
+  canonicalStatus: '标准状态',
+  deleted: '删除标记',
+};
+const PREVIEW_DATETIME_FIELDS: ReadonlySet<string> = new Set(['occurredAt', 'sourceUpdatedAt']);
+type PreviewTagPresentation = {
+  label: string;
+  color?: string;
+};
+const PREVIEW_DIRECTION_TAGS: Readonly<Record<string, PreviewTagPresentation>> = {
+  INBOUND: { label: '入库', color: 'blue' },
+  OUTBOUND: { label: '出库', color: 'orange' },
+};
+const PREVIEW_CANONICAL_STATUS_TAGS: Readonly<Record<string, PreviewTagPresentation>> = {
+  PENDING: { label: '待处理', color: 'gold' },
+  COMPLETED: { label: '已完成', color: 'success' },
+  CANCELLED: { label: '已取消', color: 'default' },
+  DELETED: { label: '已删除', color: 'error' },
+  UNKNOWN: { label: '未知', color: 'default' },
+};
 
 type PersistedValidationSummary = {
   errors: string[];
@@ -123,6 +157,42 @@ const parsePersistedValidationSummary = (summary?: string): PersistedValidationS
     };
   }
   return { errors: [], warnings: splitItems(normalized) };
+};
+
+/** 将标准事件时间统一格式化为业务页面使用的年月日时分秒。 */
+const formatPreviewDateTime = (value: unknown): string => {
+  if (value === null || value === undefined || value === '') return '-';
+  const parsed = dayjs(String(value));
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : String(value);
+};
+
+/** 将标准枚举渲染为业务中文 Tag；未知扩展值保留原文，避免信息丢失。 */
+const renderPreviewTag = (
+  value: unknown,
+  presentations: Readonly<Record<string, PreviewTagPresentation>>,
+): React.ReactNode => {
+  if (value === null || value === undefined || value === '') return '-';
+  const rawValue = String(value);
+  const presentation = presentations[rawValue.trim().toUpperCase()];
+  return (
+    <Tag color={presentation?.color} style={{ marginInlineEnd: 0 }}>
+      {presentation?.label ?? rawValue}
+    </Tag>
+  );
+};
+
+/** 返回校验预览字段的专用渲染器。 */
+const getPreviewFieldRenderer = (
+  key: string,
+): ((value: unknown) => React.ReactNode) | undefined => {
+  if (PREVIEW_DATETIME_FIELDS.has(key)) return formatPreviewDateTime;
+  if (key === 'direction') {
+    return (value) => renderPreviewTag(value, PREVIEW_DIRECTION_TAGS);
+  }
+  if (key === 'canonicalStatus') {
+    return (value) => renderPreviewTag(value, PREVIEW_CANONICAL_STATUS_TAGS);
+  }
+  return undefined;
 };
 
 /** 将 Select 中的受控 JSON 值还原为列引用。 */
@@ -189,9 +259,50 @@ const ForecastMappingWorkspace: React.FC<Props> = ({
   const activationRequestInFlight = useRef(false);
   // 网络结果不确定时复用同一幂等键；切换数据流或映射后才创建新的业务操作键。
   const activationIdempotency = useRef<{ scope: string; key: string }>();
+  // 只滚动字段映射工作区，避免校验完成后带动左侧 Profile 列表或整页发生位移。
+  const mappingScrollRef = useRef<HTMLDivElement>(null);
+  const validationSectionRef = useRef<HTMLElement>(null);
+  // 持久化校验摘要也会更新 validation；仅显式点击“校验并预览”后允许自动定位。
+  const shouldScrollToValidationResult = useRef(false);
   const profileId = profile?.id;
   const streamId = stream?.id;
   const activeMappingId = stream?.activeMappingId;
+
+  useEffect(
+    () => () => {
+      // 字段映射工作区卸载后立即移除成功通知，避免短暂覆盖数据流或其他 Forecast 页面。
+      notification.destroy(VALIDATION_SUCCESS_NOTIFICATION_KEY);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!validation || !shouldScrollToValidationResult.current) return undefined;
+    shouldScrollToValidationResult.current = false;
+
+    // 等待本轮 validation 对应的摘要和样例表格完成 DOM 提交，再计算准确落点。
+    const animationFrameId = window.requestAnimationFrame(() => {
+      const scrollContainer = mappingScrollRef.current;
+      const validationSection = validationSectionRef.current;
+      if (!scrollContainer || !validationSection) return;
+
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const validationRect = validationSection.getBoundingClientRect();
+      const targetTop =
+        scrollContainer.scrollTop +
+        validationRect.top -
+        containerRect.top -
+        VALIDATION_RESULT_SCROLL_OFFSET_PX;
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      scrollContainer.scrollTo({
+        top: Math.max(0, targetTop),
+        behavior: reduceMotion ? 'auto' : 'smooth',
+      });
+    });
+
+    // 切换 Profile、数据流或关闭工作区时取消尚未执行的定位，避免操作已销毁节点。
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, [validation]);
 
   /** 加载映射版本列表，并优先选择调用方指定版本或当前活动版本。 */
   const loadMappings = useCallback(
@@ -462,6 +573,8 @@ const ForecastMappingWorkspace: React.FC<Props> = ({
     setLoading(action);
     try {
       if (action === 'validate') {
+        // 重复校验前关闭上一条同类通知；固定 key 也能避免快速操作时出现多条成功提示。
+        notification.destroy(VALIDATION_SUCCESS_NOTIFICATION_KEY);
         const response = await validateForecastMapping(
           profile.id,
           stream.id,
@@ -469,6 +582,7 @@ const ForecastMappingWorkspace: React.FC<Props> = ({
           createForecastIdempotencyKey('mapping-validate'),
         );
         const result = unwrapForecastData<ForecastMappingValidation>(response);
+        shouldScrollToValidationResult.current = true;
         setValidation(result);
         setCurrent((selected) =>
           selected
@@ -479,6 +593,19 @@ const ForecastMappingWorkspace: React.FC<Props> = ({
               }
             : selected,
         );
+        if (result.valid) {
+          notification.success({
+            key: VALIDATION_SUCCESS_NOTIFICATION_KEY,
+            title: '映射校验通过',
+            description: result.warnings.length
+              ? `校验完成，共 ${result.warnings.length} 条警告，请在下方“校验结果”中查看。`
+              : '当前字段映射配置已通过校验。',
+            duration: VALIDATION_SUCCESS_NOTIFICATION_DURATION_SECONDS,
+            placement: 'topRight',
+            // Notification 默认距顶部 24px；增加偏移后停靠在全局导航栏下方。
+            style: { marginTop: VALIDATION_SUCCESS_NOTIFICATION_TOP_MARGIN_PX },
+          });
+        }
       } else if (action === 'publish') {
         await publishForecastMapping(
           profile.id,
@@ -508,9 +635,11 @@ const ForecastMappingWorkspace: React.FC<Props> = ({
 
   const previewColumns = validation?.samples?.[0]
     ? Object.keys(validation.samples[0]).map((key) => ({
-        title: key,
+        // 数据键继续匹配后端标准事件契约；表头只做中文展示，未知扩展字段回退原名以保证可诊断性。
+        title: PREVIEW_FIELD_LABELS[key] ?? key,
         dataIndex: key,
         ellipsis: true,
+        render: getPreviewFieldRenderer(key),
       }))
     : [];
 
@@ -631,7 +760,7 @@ const ForecastMappingWorkspace: React.FC<Props> = ({
           </div>
         </div>
       </div>
-      <div className={styles.mappingScroll}>
+      <div className={styles.mappingScroll} ref={mappingScrollRef}>
         {activationButtonState.pending && latestActivation && (
           <Alert
             showIcon
@@ -687,15 +816,6 @@ const ForecastMappingWorkspace: React.FC<Props> = ({
             style={{ marginTop: 16 }}
             title="Forecast Worker 当前离线"
             description="请先启动 Worker 再提交首次同步，否则任务只能停留在 QUEUED。"
-          />
-        )}
-        {validation && (
-          <Alert
-            style={{ marginTop: 16 }}
-            showIcon
-            type={validation.valid ? 'success' : 'error'}
-            title={validation.valid ? '映射校验通过' : validation.errors.join('；')}
-            description={validation.warnings.join('；')}
           />
         )}
         <div className={styles.mappingBody}>
@@ -960,60 +1080,77 @@ const ForecastMappingWorkspace: React.FC<Props> = ({
               </section>
             </Form>
 
-            {validation?.samples?.length ? (
-              <section className={styles.previewSection}>
-                <Typography.Text className={styles.sectionTitle} strong>
-                  校验预览
-                </Typography.Text>
-                <Table
-                  size="small"
-                  rowKey="sourceRecordId"
-                  columns={previewColumns}
-                  dataSource={validation.samples}
-                  pagination={{ pageSize: 10 }}
-                  scroll={{ x: 'max-content' }}
-                />
-              </section>
-            ) : null}
-          </div>
+            <section
+              className={styles.validationSection}
+              aria-label="校验结果"
+              ref={validationSectionRef}
+            >
+              <div className={styles.validationSectionHeader}>
+                <div className={styles.validationHeading}>
+                  <Typography.Title level={5}>校验结果</Typography.Title>
+                  <Typography.Text type="secondary">校验摘要、风险提示与样例数据</Typography.Text>
+                </div>
+                <div className={styles.validationStats}>
+                  <div className={styles.validationStat}>
+                    <Typography.Text type="secondary">错误</Typography.Text>
+                    <Typography.Title level={4}>
+                      {validationKnown ? validationErrors.length : '-'}
+                    </Typography.Title>
+                  </div>
+                  <div className={styles.validationStat}>
+                    <Typography.Text type="secondary">警告</Typography.Text>
+                    <Typography.Title level={4} style={{ color: '#d48806' }}>
+                      {validationKnown ? validationWarnings.length : '-'}
+                    </Typography.Title>
+                  </div>
+                  <div className={styles.validationStat}>
+                    <Typography.Text type="secondary">核心字段</Typography.Text>
+                    <Typography.Title level={4} style={{ color: '#389e0d' }}>
+                      {mappedCoreFieldCount}/{REQUIRED_CORE_FIELD_COUNT}
+                    </Typography.Title>
+                  </div>
+                </div>
+              </div>
 
-          <aside className={styles.validationRail} aria-label="校验结果">
-            <Typography.Title level={5}>校验结果</Typography.Title>
-            <div className={styles.validationStats}>
-              <div className={styles.validationStat}>
-                <Typography.Text type="secondary">errors</Typography.Text>
-                <Typography.Title level={4}>
-                  {validationKnown ? validationErrors.length : '-'}
-                </Typography.Title>
-              </div>
-              <div className={styles.validationStat}>
-                <Typography.Text type="secondary">warnings</Typography.Text>
-                <Typography.Title level={4} style={{ color: '#d48806' }}>
-                  {validationKnown ? validationWarnings.length : '-'}
-                </Typography.Title>
-              </div>
-              <div className={styles.validationStat}>
-                <Typography.Text type="secondary">核心字段</Typography.Text>
-                <Typography.Title level={4} style={{ color: '#389e0d' }}>
-                  {mappedCoreFieldCount}/{REQUIRED_CORE_FIELD_COUNT}
-                </Typography.Title>
-              </div>
-            </div>
-            <div className={styles.validationWarnings}>
-              {validationWarnings.length ? (
-                validationWarnings.slice(0, 3).map((warning) => (
-                  <div className={styles.warningItem} key={warning}>
+              <div className={styles.validationMessages}>
+                {validationErrors.map((error, index) => (
+                  <div className={styles.errorItem} key={`error-${index}-${error}`}>
+                    <CloseCircleOutlined />
+                    <Typography.Text type="danger">{error}</Typography.Text>
+                  </div>
+                ))}
+                {validationWarnings.map((warning, index) => (
+                  <div className={styles.warningItem} key={`warning-${index}-${warning}`}>
                     <WarningOutlined />
                     <Typography.Text>{warning}</Typography.Text>
                   </div>
-                ))
-              ) : (
-                <Typography.Text type="secondary">
-                  校验后将在这里显示错误、风险提示与预览结果。
-                </Typography.Text>
-              )}
-            </div>
-          </aside>
+                ))}
+                {!validationErrors.length && !validationWarnings.length && (
+                  <Typography.Text type="secondary">
+                    {validationKnown
+                      ? '当前映射未发现错误或警告。'
+                      : '点击“校验并预览”后将在这里显示校验结果与样例数据。'}
+                  </Typography.Text>
+                )}
+              </div>
+
+              {validation?.samples?.length ? (
+                <div className={styles.previewSection}>
+                  <Typography.Text className={styles.sectionTitle} strong>
+                    数据预览
+                  </Typography.Text>
+                  <Table
+                    size="small"
+                    rowKey="sourceRecordId"
+                    columns={previewColumns}
+                    dataSource={validation.samples}
+                    pagination={{ pageSize: 10 }}
+                    scroll={{ x: 'max-content' }}
+                  />
+                </div>
+              ) : null}
+            </section>
+          </div>
         </div>
       </div>
 

@@ -322,17 +322,172 @@ public class ForecastDecisionRepository {
      */
     public List<DailyActual> findDailyActuals(Connection connection, Long profileId,
             LocalDate startInclusive, LocalDate endExclusive) throws SQLException {
+        return findDailyActuals(connection, profileId, null, startInclusive, endExclusive);
+    }
+
+    /**
+     * 读取指定方向和窗口内已激活仓库的日实际量。
+     *
+     * <p>
+     * 方向为空时保留原有“入库 + 出库”口径；指定方向时在数据库聚合前过滤，避免先加载全部 数据再在 JVM 中筛选造成不必要的传输与内存占用。
+     *
+     * @param connection 决策库连接。
+     * @param profileId Profile ID。
+     * @param direction 可选的出入库方向；为空表示全部方向。
+     * @param startInclusive 开始日期。
+     * @param endExclusive 结束日期。
+     * @return 按仓库、方向、日期排序的日值。
+     * @throws SQLException 查询失败。
+     */
+    public List<DailyActual> findDailyActuals(Connection connection, Long profileId,
+            ForecastDirection direction, LocalDate startInclusive, LocalDate endExclusive)
+            throws SQLException {
+        String directionPredicate = direction == null ? "" : " AND direction=?";
         String sql =
                 "SELECT business_date, warehouse_code, direction, SUM(quantity_sum) quantity_sum, "
                         + "SUM(task_count) task_count FROM " + table("v_forecast_daily_fact")
-                        + " WHERE profile_id=? AND business_date>=? AND business_date<? "
+                        + " WHERE profile_id=?" + directionPredicate
+                        + " AND business_date>=? AND business_date<? "
                         + "GROUP BY business_date, warehouse_code, direction "
                         + "ORDER BY warehouse_code, direction, business_date";
         try (PreparedStatement statement = prepare(connection, sql)) {
-            statement.setLong(1, profileId);
-            statement.setDate(2, Date.valueOf(startInclusive));
-            statement.setDate(3, Date.valueOf(endExclusive));
+            int parameterIndex = 1;
+            statement.setLong(parameterIndex++, profileId);
+            if (direction != null) {
+                statement.setString(parameterIndex++, direction.name());
+            }
+            statement.setDate(parameterIndex++, Date.valueOf(startInclusive));
+            statement.setDate(parameterIndex, Date.valueOf(endExclusive));
             return readDailyActuals(statement);
+        }
+    }
+
+    /**
+     * 查询 Profile 在指定日期之前的实际数据边界。
+     *
+     * <p>
+     * 结束日期使用开区间，正式预测可据此排除尚未完整结束的“今天”，避免将部分日数据当作 完整训练样本。
+     *
+     * @param connection 决策库连接。
+     * @param profileId Profile ID。
+     * @param endExclusive 业务日期开区间上界。
+     * @return 最早和最新完整业务日；没有数据时两个字段均为空。
+     * @throws SQLException 查询失败。
+     */
+    public ActualDateRange findActualDateRange(Connection connection, Long profileId,
+            LocalDate endExclusive) throws SQLException {
+        return findActualDateRange(connection, profileId, null, endExclusive);
+    }
+
+    /**
+     * 查询 Profile 指定方向在目标日期之前的实际数据边界。
+     *
+     * <p>
+     * 方向为空时返回全部方向的合并边界；指定方向时返回该方向自己的最早和最新完整业务日， 供训练区间控件与后端校验共同使用。
+     *
+     * @param connection 决策库连接。
+     * @param profileId Profile ID。
+     * @param direction 可选的出入库方向；为空表示全部方向。
+     * @param endExclusive 业务日期开区间上界。
+     * @return 最早和最新完整业务日；没有数据时两个字段均为空。
+     * @throws SQLException 查询失败。
+     */
+    public ActualDateRange findActualDateRange(Connection connection, Long profileId,
+            ForecastDirection direction, LocalDate endExclusive) throws SQLException {
+        String directionPredicate = direction == null ? "" : " AND direction=?";
+        String sql = "SELECT MIN(business_date), MAX(business_date) FROM "
+                + table("v_forecast_daily_fact") + " WHERE profile_id=?" + directionPredicate
+                + " AND business_date<?";
+        try (PreparedStatement statement = prepare(connection, sql)) {
+            int parameterIndex = 1;
+            statement.setLong(parameterIndex++, profileId);
+            if (direction != null) {
+                statement.setString(parameterIndex++, direction.name());
+            }
+            statement.setDate(parameterIndex, Date.valueOf(endExclusive));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                Date first = resultSet.getDate(1);
+                Date latest = resultSet.getDate(2);
+                return new ActualDateRange(first == null ? null : first.toLocalDate(),
+                        latest == null ? null : latest.toLocalDate());
+            }
+        }
+    }
+
+    /**
+     * 查询候选映射快照在指定日期之前的最新完整业务日。
+     *
+     * <p>
+     * 首次激活映射时目标数据流尚未进入正式视图，因此必须以候选映射替换该流、其余流继续 使用当前激活映射，确保预测基准与随后发布的候选快照一致。
+     *
+     * @param connection 决策库连接。
+     * @param profileId Profile ID。
+     * @param candidateStreamId 候选数据流 ID。
+     * @param candidateMappingId 候选映射 ID。
+     * @param endExclusive 业务日期开区间上界。
+     * @return 最新完整业务日；没有数据时为空。
+     * @throws SQLException 查询失败。
+     */
+    public LocalDate findLatestActualDateForCandidate(Connection connection, Long profileId,
+            Long candidateStreamId, Long candidateMappingId, LocalDate endExclusive)
+            throws SQLException {
+        String sql = "SELECT MAX(business_date) FROM (SELECT f.business_date FROM "
+                + table("daily_fact") + " f JOIN " + table("stream_activation")
+                + " a ON a.profile_id=f.profile_id AND a.stream_id=f.stream_id "
+                + "AND a.mapping_id=f.mapping_id WHERE f.profile_id=? AND f.stream_id<>? "
+                + "UNION ALL SELECT f.business_date FROM " + table("daily_fact")
+                + " f WHERE f.profile_id=? AND f.stream_id=? AND f.mapping_id=?) selected_facts "
+                + "WHERE business_date<?";
+        try (PreparedStatement statement = prepare(connection, sql)) {
+            statement.setLong(1, profileId);
+            statement.setLong(2, candidateStreamId);
+            statement.setLong(3, profileId);
+            statement.setLong(4, candidateStreamId);
+            statement.setLong(5, candidateMappingId);
+            statement.setDate(6, Date.valueOf(endExclusive));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                Date latest = resultSet.getDate(1);
+                return latest == null ? null : latest.toLocalDate();
+            }
+        }
+    }
+
+    /**
+     * 查询当前发布任务使用的训练与预测日期窗口。
+     *
+     * @param connection 决策库连接。
+     * @param profileId Profile ID。
+     * @return 发布窗口；尚未发布任何模型运行时为空。
+     * @throws SQLException 查询失败。
+     */
+    public ForecastWindow findPublishedForecastWindow(Connection connection, Long profileId)
+            throws SQLException {
+        String sql = "SELECT MIN(m.training_start), MAX(m.training_end), "
+                + "MIN(r.forecast_date), MAX(r.forecast_date) FROM " + table("model_run")
+                + " m JOIN " + table("forecast_publication")
+                + " p ON p.profile_id=m.profile_id AND p.job_id=m.job_id LEFT JOIN "
+                + table("forecast_result") + " r ON r.model_run_id=m.id WHERE m.profile_id=?";
+        try (PreparedStatement statement = prepare(connection, sql)) {
+            statement.setLong(1, profileId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                Date trainingStartValue = resultSet.getDate(1);
+                Date trainingEndValue = resultSet.getDate(2);
+                if (trainingStartValue == null || trainingEndValue == null) {
+                    return null;
+                }
+                LocalDate trainingStart = trainingStartValue.toLocalDate();
+                LocalDate trainingEnd = trainingEndValue.toLocalDate();
+                Date forecastStartValue = resultSet.getDate(3);
+                Date forecastEndValue = resultSet.getDate(4);
+                LocalDate forecastStart = forecastStartValue == null ? trainingEnd.plusDays(1)
+                        : forecastStartValue.toLocalDate();
+                LocalDate forecastEnd = forecastEndValue == null ? forecastStart.plusDays(29)
+                        : forecastEndValue.toLocalDate();
+                return new ForecastWindow(trainingStart, trainingEnd, forecastStart, forecastEnd);
+            }
         }
     }
 
@@ -825,6 +980,13 @@ public class ForecastDecisionRepository {
     /** 训练和看板复用的日实际值。 */
     public record DailyActual(LocalDate date, String warehouseCode, ForecastDirection direction,
             BigDecimal quantity, long taskCount) {}
+
+    /** Profile 当前激活实际数据的日期边界。 */
+    public record ActualDateRange(LocalDate firstDate, LocalDate latestDate) {}
+
+    /** 当前发布任务的训练与预测窗口。 */
+    public record ForecastWindow(LocalDate trainingStart, LocalDate trainingEnd,
+            LocalDate forecastStart, LocalDate forecastEnd) {}
 
     /** 看板汇总结果。 */
     public record OverviewSummary(BigDecimal predictedTotal, BigDecimal previousActualTotal,

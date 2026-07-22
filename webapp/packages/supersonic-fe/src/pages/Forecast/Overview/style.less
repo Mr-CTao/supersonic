@@ -58,6 +58,219 @@
   box-sizing: border-box;
   .forecastScrollbar();
 
+  .primaryFilters {
+    width: 100%;
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    background: var(--ant-color-bg-container, #fff);
+    border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+    border-radius: var(--ant-border-radius-lg, 8px);
+    box-sizing: border-box;
+  }
+
+  // 运行状态紧跟业务筛选项展示，既符合筛选行的信息层级，也为下方日期上下文释放宽度。
+  .primaryStatusTags {
+    margin-inline-start: 8px;
+    white-space: nowrap;
+
+    :global(.ant-tag) {
+      margin-inline-end: 0;
+    }
+  }
+
+  .profileSelect {
+    width: 300px;
+  }
+
+  // 基准条使用弱蓝色建立“预测时间上下文”，但保持低对比度，避免抢占图表主视觉。
+  .anchorBar {
+    display: grid;
+    grid-template-columns: auto minmax(260px, 1fr) auto;
+    gap: 16px;
+    align-items: center;
+    margin-bottom: 16px;
+    padding: 16px 20px;
+    background: #f0f7ff;
+    border: 1px solid #bae0ff;
+    border-radius: 6px;
+  }
+
+  .anchorControls,
+  .anchorActions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+  }
+
+  // 预测基准与训练窗口可能同时出现，允许整组换行但不拆散日期控件内部内容。
+  .anchorControls {
+    flex-wrap: wrap;
+  }
+
+  .trainingControls {
+    flex-wrap: nowrap;
+
+    :global(.ant-picker-range) {
+      width: 238px;
+    }
+
+    :global(.ant-btn-link) {
+      padding-inline: 2px;
+    }
+  }
+
+  .anchorContext {
+    min-width: 0;
+    text-align: center;
+  }
+
+  // 日期上下文按独立 Tag 分组；桌面端保持单行，状态 Tag 移出后可完整利用中间列宽。
+  .dateContextTags {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .dateContextTag {
+    flex: 0 0 auto;
+    margin-inline-end: 0;
+    padding-inline: 8px;
+  }
+
+  .anchorActions {
+    justify-content: flex-end;
+  }
+
+  .statusAlert {
+    margin-bottom: 16px;
+  }
+
+  .summaryCard {
+    height: 100%;
+  }
+
+  // 模型表现与两个业务总量保持同一层级，三项质量信息在卡片内横向对照。
+  .performanceHeader {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+
+    :global(.ant-btn-link) {
+      height: auto;
+      padding: 0;
+    }
+  }
+
+  .performanceTitle,
+  .performanceLabel {
+    color: rgb(0 0 0 / 45%);
+    font-size: 14px;
+  }
+
+  // 模型表现卡占据摘要行的一半宽度，算法、WAPE、Bias 严格三等分；
+  // 业务文案变长时由 Tag 或 Bias 说明自然换行，而不是改变列宽或裁切内容。
+  .performanceGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    align-items: end;
+  }
+
+  .performanceMetric {
+    min-width: 0;
+  }
+
+  .performanceMetric + .performanceMetric {
+    padding-inline-start: 12px;
+    border-inline-start: 1px solid #f0f0f0;
+  }
+
+  .performanceLabel {
+    margin-bottom: 6px;
+    white-space: nowrap;
+  }
+
+  .performanceAlgorithmTag {
+    max-width: 100%;
+    margin-inline-end: 0;
+    font-size: 14px;
+    line-height: 22px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .performanceValueRow {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .performanceValue {
+    color: #262626;
+    font-size: 24px;
+    line-height: 30px;
+    white-space: nowrap;
+  }
+
+  .biasDirection {
+    color: rgb(0 0 0 / 45%);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .breakdownDrawerHint {
+    margin-bottom: 12px;
+    color: rgb(0 0 0 / 45%);
+    line-height: 22px;
+  }
+
+  .tableAlgorithmTag {
+    max-width: 100%;
+    margin-inline-end: 0;
+    line-height: 20px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  // 术语帮助图标保持弱强调，既能被发现，也不抢占 KPI 和表格数值的视觉层级。
+  .termHelpIcon {
+    color: #8c8c8c;
+    cursor: help;
+  }
+
+  .termHelpContent {
+    line-height: 1.65;
+  }
+
+  .termHelpRow {
+    margin-top: 6px;
+  }
+
+  // 同时展示完整训练口径与图表裁剪口径，避免用户把“末 N 天”误认为模型只训练了 N 天。
+  .trendCardTitle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    align-items: center;
+    width: 100%;
+    white-space: normal;
+  }
+
+  .trendWindowHint {
+    color: rgb(0 0 0 / 45%);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 20px;
+  }
+
   // Row 的默认负边距会额外制造 8px 横向溢出；归零后保留 Col gutter，同时取消无意义的页面横向滚动条。
   .dashboardGrid {
     margin-right: 0 !important;
@@ -68,5 +281,66 @@
   :global(.ant-table-body),
   :global(.ant-table-content) {
     .forecastScrollbar();
+  }
+
+  // 有侧边栏的中等宽度视口实际内容区更窄，提前改为两行可避免训练日期控件挤压状态标签。
+  @media (max-width: 1600px) {
+    .anchorBar {
+      grid-template-columns: 1fr auto;
+    }
+
+    .anchorContext {
+      grid-row: 2;
+      grid-column: 1 / -1;
+      text-align: left;
+    }
+
+    .dateContextTags {
+      justify-content: flex-start;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .profileSelect {
+      width: min(100%, 300px);
+    }
+
+    .anchorBar {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      padding: 14px;
+    }
+
+    .anchorControls,
+    .anchorActions {
+      flex-wrap: wrap;
+      justify-content: flex-start;
+    }
+
+    .trainingControls {
+      width: 100%;
+      flex-wrap: wrap;
+
+      :global(.ant-picker-range) {
+        width: min(100%, 280px);
+      }
+    }
+
+    .dateContextTags {
+      flex-wrap: wrap;
+      white-space: normal;
+    }
+
+    .performanceGrid {
+      grid-template-columns: 1fr;
+    }
+
+    .performanceMetric + .performanceMetric {
+      padding-block-start: 10px;
+      padding-inline-start: 0;
+      border-block-start: 1px solid #f0f0f0;
+      border-inline-start: 0;
+    }
   }
 }

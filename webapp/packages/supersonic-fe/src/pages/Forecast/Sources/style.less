@@ -455,11 +455,7 @@
 }
 
 .mappingBody {
-  display: grid;
   min-width: 0;
-  align-items: start;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  gap: 22px;
 }
 
 .mappingFormCanvas {
@@ -567,21 +563,45 @@
 }
 
 .previewSection {
-  padding-top: 18px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid @border-color;
 }
 
-.validationRail {
-  position: sticky;
-  top: 0;
+.validationSection {
   min-width: 0;
-  padding-left: 20px;
-  border-left: 1px solid @border-color;
+  margin-top: 18px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid @border-color;
+  border-radius: 8px;
+}
+
+.validationSectionHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.validationHeading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+
+  :global(.ant-typography) {
+    margin: 0;
+  }
 }
 
 .validationStats {
   display: grid;
-  margin: 12px 0 16px;
-  grid-template-columns: repeat(3, 1fr);
+  width: 360px;
+  max-width: 100%;
+  grid-template-columns: repeat(3, minmax(96px, 1fr));
+  flex: none;
   gap: 8px;
 }
 
@@ -596,19 +616,23 @@
   gap: 4px;
 
   :global(.ant-typography) {
+    margin: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
 
-.validationWarnings {
+.validationMessages {
   display: flex;
-  margin-bottom: 16px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid @border-color;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
+.errorItem,
 .warningItem {
   display: flex;
   align-items: flex-start;
@@ -616,8 +640,19 @@
 
   :global(.anticon) {
     margin-top: 3px;
-    color: #faad14;
     flex: none;
+  }
+}
+
+.errorItem {
+  :global(.anticon) {
+    color: #ff4d4f;
+  }
+}
+
+.warningItem {
+  :global(.anticon) {
+    color: #faad14;
   }
 }
 
@@ -686,10 +721,6 @@
   .summaryItem:nth-child(-n + 3) {
     border-bottom: 1px solid @border-color;
   }
-
-  .mappingBody {
-    grid-template-columns: minmax(0, 1fr) 230px;
-  }
 }
 
 @media (max-width: 1180px) {
@@ -700,18 +731,6 @@
   .detailHeader,
   .mappingFooter {
     align-items: flex-start;
-  }
-
-  .mappingBody {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .validationRail {
-    position: static;
-    padding-top: 18px;
-    padding-left: 0;
-    border-top: 1px solid @border-color;
-    border-left: 0;
   }
 
   .syncGrid,
@@ -727,16 +746,14 @@
     grid-template-columns: 264px minmax(0, 1fr);
   }
 
-  .mappingBody {
-    grid-template-columns: minmax(0, 1fr);
+  .validationSectionHeader {
+    align-items: stretch;
+    flex-direction: column;
   }
 
-  .validationRail {
-    position: static;
-    padding-top: 18px;
-    padding-left: 0;
-    border-top: 1px solid @border-color;
-    border-left: 0;
+  .validationStats {
+    width: 100%;
+    max-width: 420px;
   }
 
   .syncGrid,

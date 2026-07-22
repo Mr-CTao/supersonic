@@ -318,15 +318,26 @@ public class ForecastJobExecutor {
         }
         ZoneId zone = ZoneId.of(profile.getTimeZone());
         LocalDate today = LocalDate.now(zone);
-        LocalDate start = today.minusDays(profile.getHistoryDays());
+        LocalDate forecastStart;
+        LocalDate start;
         List<DailyActual> actuals;
         try (Connection decision =
                 databaseRegistry.openDecisionReadOnly(profile.getDecisionDatabaseId())) {
             decisionRepository.validateSchema(decision);
+            LocalDate latestActualDate = candidateStreamId == null || candidateMappingId == null
+                    ? decisionRepository.findActualDateRange(decision, profile.getId(), today)
+                            .latestDate()
+                    : decisionRepository.findLatestActualDateForCandidate(decision, profile.getId(),
+                            candidateStreamId, candidateMappingId, today);
+            // 预测紧跟最新完整业务日，避免历史数据集到“今天”之间的未知日期被批量补零。
+            // 没有任何完整业务日时保留今天作为空结果锚点，使任务仍能安全发布数据不足状态。
+            forecastStart = latestActualDate == null ? today : latestActualDate.plusDays(1);
+            start = forecastStart.minusDays(profile.getHistoryDays());
             actuals = candidateStreamId == null || candidateMappingId == null
-                    ? decisionRepository.findDailyActuals(decision, profile.getId(), start, today)
+                    ? decisionRepository.findDailyActuals(decision, profile.getId(), start,
+                            forecastStart)
                     : decisionRepository.findDailyActualsForCandidate(decision, profile.getId(),
-                            candidateStreamId, candidateMappingId, start, today);
+                            candidateStreamId, candidateMappingId, start, forecastStart);
             decision.rollback();
         }
         Map<SeriesKey, Map<LocalDate, DailyActual>> grouped = new LinkedHashMap<>();
@@ -351,7 +362,8 @@ public class ForecastJobExecutor {
             for (ForecastMetric metric : metrics) {
                 ensureRunning(shouldStop);
                 // 从第一条真实业务日开始计样本，避免把接入窗口前的未知日期误当作零销量。
-                List<BigDecimal> values = fillSeries(seriesStart, today, entry.getValue(), metric);
+                List<BigDecimal> values =
+                        fillSeries(seriesStart, forecastStart, entry.getValue(), metric);
                 ForecastModelSelection selection = modelSelector.select(
                         new ForecastSeries(entry.getKey().stableKey(metric), values),
                         FORECAST_HORIZON);
@@ -359,7 +371,7 @@ public class ForecastJobExecutor {
                         databaseRegistry.openDecision(profile.getDecisionDatabaseId())) {
                     decisionRepository.saveForecast(decision, job.getId(), profile.getId(),
                             entry.getKey().warehouseCode(), entry.getKey().direction(), metric,
-                            seriesStart, today.minusDays(1), today, selection);
+                            seriesStart, forecastStart.minusDays(1), forecastStart, selection);
                 }
                 completed++;
                 int progress = 90 + Math.min(9, (completed * 9) / total);
