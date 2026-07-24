@@ -1,8 +1,8 @@
 /**
  * AI 语义建模草稿页面样式。
  *
- * 职责：动态计算列表可视高度、保持操作区不换行、详情结构树可滚动、JSON 编辑器可读，
- * 并让重新生成弹窗、尝试历史、版本快照、AI 修订、验证报告和结构化差异稳定展示。
+ * 职责：动态计算列表可视高度、让同一表格容器承载双向滚动并保持表头/表体列宽一致、
+ * 保持操作区不换行、详情结构树与 JSON 编辑器可读，并使各类草稿工作台面板稳定展示。
  */
 .draftTable {
   :global {
@@ -42,16 +42,12 @@
       flex-direction: column;
     }
 
-    .ant-table-content {
-      flex: 1;
-      min-height: 0;
-      overflow: auto !important;
-    }
-
+    .ant-table-content,
     .ant-table-body {
       flex: 1;
+      min-height: 0;
       max-height: none !important;
-      overflow-y: auto !important;
+      overflow: auto !important;
     }
 
     // 分页固定在动态表格区域底部，少量数据时不会在页面中部悬空。

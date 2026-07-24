@@ -13,6 +13,7 @@ import { Button, message } from 'antd';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getModelingDrafts } from '@/services/semanticModelingDraft';
 import type { ModelingDraftItem } from '@/services/semanticModelingDraft';
+import scrollbarStyles from '../tableScrollbar.less';
 import CreateDraftDrawer from './components/CreateDraftDrawer';
 import DraftWorkbenchDrawer from './components/DraftWorkbenchDrawer';
 import RegenerateDraftModal from './components/RegenerateDraftModal';
@@ -99,7 +100,7 @@ const ModelingDrafts: React.FC = () => {
     <>
       <ProTable<ModelingDraftItem>
         actionRef={actionRef}
-        className={styles.draftTable}
+        className={`${styles.draftTable} ${scrollbarStyles.tableScrollbar}`}
         columns={columns}
         request={async (params) => {
           const next = {
@@ -125,7 +126,7 @@ const ModelingDrafts: React.FC = () => {
           }
         }}
         rowKey="id"
-        search={{ labelWidth: 88, defaultCollapsed: false }}
+        search={{ labelWidth: 88, defaultCollapsed: true }}
         options={{ density: false }}
         scroll={{ x: TABLE_SCROLL_X }}
         pagination={{ defaultPageSize: DEFAULT_PAGE_SIZE, showSizeChanger: true }}

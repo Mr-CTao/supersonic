@@ -1,0 +1,65 @@
+/**
+ * AI 语义建模主表格共享展示样式。
+ *
+ * 职责：复用出入库预测运行中心的细滚动条视觉，统一三个子页面主表格的横向、纵向
+ * 滚动反馈与空状态垂直位置；不接管滚动行为，也不影响抽屉内的辅助表格。
+ */
+@scrollbar-thumb-color: rgb(144 147 153 / 38%);
+@scrollbar-thumb-hover-color: rgb(144 147 153 / 50%);
+@scrollbar-thumb-active-color: rgb(144 147 153 / 68%);
+
+.tableScrollbar {
+  :global {
+    // 固定表头表格由 body 承载数据，无固定表头表格由 content 同时承载表头和数据。
+    // 仅为空表时撑满对应容器，使占位行获得剩余高度；真实数据行仍保持自然行高。
+    .ant-table-empty .ant-table-body > table,
+    .ant-table-empty .ant-table-content > table {
+      height: 100%;
+    }
+
+    .ant-table-empty .ant-table-placeholder > .ant-table-cell {
+      vertical-align: middle;
+    }
+
+    // Ant Design 无固定表头时由 content 滚动，设置 scroll.y 后由 body 滚动，两种结构统一覆盖。
+    .ant-table-content,
+    .ant-table-body {
+      scrollbar-color: @scrollbar-thumb-color transparent;
+      scrollbar-width: thin;
+
+      &::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+
+      &::-webkit-scrollbar-track,
+      &::-webkit-scrollbar-corner {
+        background: transparent;
+      }
+
+      &::-webkit-scrollbar-thumb {
+        min-width: 28px;
+        min-height: 28px;
+        background-color: @scrollbar-thumb-color;
+        background-clip: padding-box;
+        border: 2px solid transparent;
+        border-radius: 999px;
+        transition: background-color 0.2s ease-out;
+      }
+
+      &:hover::-webkit-scrollbar-thumb {
+        background-color: @scrollbar-thumb-hover-color;
+      }
+
+      &::-webkit-scrollbar-thumb:hover {
+        background-color: @scrollbar-thumb-active-color;
+      }
+
+      &::-webkit-scrollbar-button {
+        display: none;
+        width: 0;
+        height: 0;
+      }
+    }
+  }
+}

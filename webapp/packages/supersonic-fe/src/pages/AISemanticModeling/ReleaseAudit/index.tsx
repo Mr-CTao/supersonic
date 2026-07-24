@@ -21,9 +21,11 @@ import {
   type SemanticReleaseItem,
 } from '@/services/semanticRelease';
 import { getRequestErrorText, unwrapResponseData } from '../ModelingDrafts/utils';
+import scrollbarStyles from '../tableScrollbar.less';
 import ApprovalDetailDrawer from './components/ApprovalDetailDrawer';
 import ReleaseDetailDrawer from './components/ReleaseDetailDrawer';
 import RollbackModal from './components/RollbackModal';
+import styles from './style.less';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -356,8 +358,9 @@ const ReleaseAudit: React.FC = () => {
   );
 
   return (
-    <>
+    <div className={styles.releaseAuditPage}>
       <Tabs
+        className={styles.releaseAuditTabs}
         defaultActiveKey="approvals"
         items={[
           {
@@ -366,9 +369,11 @@ const ReleaseAudit: React.FC = () => {
             children: (
               <ProTable<SemanticApprovalItem>
                 actionRef={approvalActionRef}
+                className={`${styles.releaseAuditTable} ${scrollbarStyles.tableScrollbar}`}
                 rowKey="draftId"
                 columns={approvalColumns}
-                scroll={{ x: 1360 }}
+                scroll={{ x: 1360, y: '100%' }}
+                search={{ defaultCollapsed: true }}
                 options={{ density: false }}
                 pagination={{ defaultPageSize: DEFAULT_PAGE_SIZE, showSizeChanger: true }}
                 request={async (params) => {
@@ -395,9 +400,11 @@ const ReleaseAudit: React.FC = () => {
             children: (
               <ProTable<SemanticReleaseItem>
                 actionRef={releaseActionRef}
+                className={`${styles.releaseAuditTable} ${scrollbarStyles.tableScrollbar}`}
                 rowKey="id"
                 columns={releaseColumns}
-                scroll={{ x: 1300 }}
+                scroll={{ x: 1300, y: '100%' }}
+                search={{ defaultCollapsed: true }}
                 options={{ density: false }}
                 pagination={{ defaultPageSize: DEFAULT_PAGE_SIZE, showSizeChanger: true }}
                 request={async (params) => {
@@ -463,7 +470,7 @@ const ReleaseAudit: React.FC = () => {
         onCancel={() => setRollbackRelease(undefined)}
         onConfirm={rollback}
       />
-    </>
+    </div>
   );
 };
 

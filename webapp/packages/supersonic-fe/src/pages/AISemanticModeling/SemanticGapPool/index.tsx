@@ -29,6 +29,7 @@ import {
 } from 'antd';
 import dayjs from 'dayjs';
 import React, { useMemo, useRef, useState } from 'react';
+import scrollbarStyles from '../tableScrollbar.less';
 import styles from './style.less';
 import {
   getSemanticGapDetail,
@@ -446,7 +447,7 @@ const SemanticGapPool: React.FC = () => {
     <>
       <ProTable<SemanticGapItem>
         actionRef={actionRef}
-        className={styles.semanticGapTable}
+        className={`${styles.semanticGapTable} ${scrollbarStyles.tableScrollbar}`}
         columns={columns}
         request={async (params) => {
           const nextPageInfo = {
@@ -477,12 +478,12 @@ const SemanticGapPool: React.FC = () => {
         rowKey="id"
         search={{
           labelWidth: 90,
-          defaultCollapsed: false,
+          defaultCollapsed: true,
         }}
         options={{
           density: false,
         }}
-        scroll={{ x: TABLE_SCROLL_X }}
+        scroll={{ x: TABLE_SCROLL_X, y: '100%' }}
         pagination={{
           defaultPageSize: DEFAULT_PAGE_SIZE,
           showSizeChanger: true,

@@ -1,0 +1,95 @@
+/**
+ * AI 语义建模发布审计页面样式。
+ *
+ * 职责：建立工作台、Tabs 与两张 ProTable 之间的完整高度链，让当前 Tab 的主表体独立
+ * 承载横向和纵向滚动，并将分页稳定停靠在可视区域底部。
+ */
+.releaseAuditPage {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.releaseAuditTabs {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+
+  :global {
+    .ant-tabs-nav {
+      flex: none;
+    }
+
+    // 同时兼容 Ant Design 5/6 的 Tabs 内容包装层，确保活动面板获得全部剩余高度。
+    .ant-tabs-content-holder,
+    .ant-tabs-body-holder,
+    .ant-tabs-body,
+    .ant-tabs-content,
+    .ant-tabs-tabpane,
+    .ant-tabs-content-holder > .ant-tabs-content,
+    .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    // 已访问但被隐藏的 Tab 不能继续参与 flex 分配，否则会压缩当前表格的可用高度。
+    .ant-tabs-content-hidden,
+    .ant-tabs-tabpane-hidden {
+      display: none;
+    }
+  }
+}
+
+.releaseAuditTable {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+
+  :global {
+    .ant-pro-card,
+    .ant-pro-card-body,
+    .ant-table-wrapper,
+    .ant-spin,
+    .ant-spin-nested-loading,
+    .ant-spin-container,
+    .ant-table,
+    .ant-table-container {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    // 查询面板按内容自然占高，剩余空间全部交给列表表体。
+    .ant-pro-table-search,
+    .ant-pro-query-filter,
+    .ant-pro-table-list-toolbar,
+    .ant-table-header {
+      flex: none;
+    }
+
+    .ant-pro-card-body {
+      overflow: hidden;
+    }
+
+    .ant-table-body {
+      flex: 1;
+      min-height: 0;
+      max-height: none !important;
+      overflow: auto !important;
+    }
+
+    .ant-table-pagination.ant-pagination {
+      flex: none;
+      margin-bottom: 0;
+    }
+  }
+}

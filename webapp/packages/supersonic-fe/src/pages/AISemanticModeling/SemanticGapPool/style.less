@@ -4,6 +4,7 @@
  * 职责：
  * - 固定表格卡片的主要可视高度；
  * - 让分页组件在数据较少时仍停靠在表格区域右下角；
+ * - 让表体独立承载横向与纵向滚动，滚动条视觉由模块共享样式统一提供；
  * - 仅作用于语义缺口池页面，避免影响其他 ProTable。
  */
 .semanticGapTable {
@@ -41,16 +42,12 @@
       flex-direction: column;
     }
 
-    .ant-table-content {
-      flex: 1;
-      min-height: 0;
-      overflow: auto !important;
-    }
-
+    .ant-table-content,
     .ant-table-body {
       flex: 1;
+      min-height: 0;
       max-height: none !important;
-      overflow-y: auto !important;
+      overflow: auto !important;
     }
 
     .ant-table-pagination.ant-pagination {
